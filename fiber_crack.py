@@ -50,6 +50,11 @@ reloadOriginalData = False
 
 #############################################
 
+# todo Sigma-filtering when searching for unmatched pixels
+# todo Strip NaNs from the metadata/metaheader
+# todo PTFE-Epoxy frame 4465 data is incomplete.
+
+
 class Dataset:
     data = None
     header = None
@@ -270,10 +275,10 @@ def predict_frame(data, header, targetFrame, timeWindow, targetFeature, features
     # yVal = normalizer.scale(yVal)
 
     model, history = train_net(XTrain, yTrain, XVal, yVal, patchSize)
-    XTest = normalizerX.scale(netDataX[startTestIndex:,
-                              ...])  # .reshape((netDataX.shape[0] - startTestIndex, -1))  # todo flatten for a simpler net
-    yTest = netDataY[startTestIndex:,
-            ...]  # .reshape((netDataY.shape[0] - startTestIndex, -1))  # todo flatten for a simpler net
+    XTest = normalizerX.scale(netDataX[startTestIndex:,...])
+    yTest = netDataY[startTestIndex:, ...]
+    # .reshape((netDataY.shape[0] - startTestIndex, -1))  # flatten for a simpler net
+    # .reshape((netDataX.shape[0] - startTestIndex, -1))  # flatten for a simpler net
     prediction = model.predict(XTest)
     testScore = model.evaluate(XTest, yTest, verbose=0)
     print("Test score: {}".format(testScore))
