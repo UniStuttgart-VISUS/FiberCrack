@@ -8,7 +8,7 @@ import time
 import warnings
 
 from FiberCrack.Normalizer import Normalizer
-from FiberCrack.data_loading import readDataFromCsv
+from data_loading import readDataFromCsv
 import os, math
 import re
 import matplotlib.pyplot as plt
@@ -18,7 +18,7 @@ import pickle
 import keras
 import skimage.measure, skimage.transform, skimage.util, skimage.filters, skimage.feature, skimage.morphology
 import scipy.ndimage.morphology
-from keras.layers import Convolution3D, Dropout, MaxPooling3D, Dense, Flatten
+from keras.layers import Dense
 from keras.constraints import maxnorm
 from PIL import Image
 
@@ -29,7 +29,7 @@ from os import path
 
 basePath = 'W:\Experiments\Steel-Epoxy'
 metadataFilename = 'Steel-Epoxy.csv'
-dataDir = 'data_export'
+dataDir = 'data_export_tstep3'
 imageDir = 'raw_images'
 imageBaseName = 'Spec054'
 
@@ -180,32 +180,37 @@ def train_net(XTrain, yTrain, XVal, yVal, patchSize):
     timeStart = time.time()
     model = keras.models.Sequential()
 
-    model.add(
-        Convolution3D(32, patchSize[0], 3, 3, input_shape=(patchSize[0], patchSize[1], patchSize[2], XTrain.shape[-1]),
-                      border_mode="same",
-                      activation="relu", W_constraint=maxnorm(3)))
-    model.add(Dropout(0.2))
-    model.add(Convolution3D(32, patchSize[0], 3, 3, activation="relu", border_mode="same"))
-    model.add(MaxPooling3D(pool_size=(patchSize[0], 2, 2)))
-    model.add(Convolution3D(64, 1, 3, 3, activation="relu", border_mode="same"))
+    # model.add(
+    #     Convolution3D(32, patchSize[0], 3, 3, input_shape=(patchSize[0], patchSize[1], patchSize[2], XTrain.shape[-1]),
+    #                   border_mode="same",
+    #                   activation="relu", W_constraint=maxnorm(3)))
     # model.add(Dropout(0.2))
-    # model.add(Convolution3D(64, patchSize[0], 3, 3, activation="relu", border_mode="same"))
+    # model.add(Convolution3D(32, patchSize[0], 3, 3, activation="relu", border_mode="same"))
     # model.add(MaxPooling3D(pool_size=(patchSize[0], 2, 2)))
-    # model.add(Convolution3D(128, 3, 3, activation="relu", border_mode="same"))
+    # model.add(Convolution3D(64, 1, 3, 3, activation="relu", border_mode="same"))
+    # # model.add(Dropout(0.2))
+    # # model.add(Convolution3D(64, patchSize[0], 3, 3, activation="relu", border_mode="same"))
+    # # model.add(MaxPooling3D(pool_size=(patchSize[0], 2, 2)))
+    # # model.add(Convolution3D(128, 3, 3, activation="relu", border_mode="same"))
+    # # model.add(Dropout(0.2))
+    # # model.add(Convolution3D(128, 3, 3, activation="relu", border_mode="same"))
+    # # model.add(MaxPooling3D(pool_size=(2, 2)))
+    # model.add(Flatten())
+    #
     # model.add(Dropout(0.2))
-    # model.add(Convolution3D(128, 3, 3, activation="relu", border_mode="same"))
-    # model.add(MaxPooling3D(pool_size=(2, 2)))
-    model.add(Flatten())
+    # model.add(Dense(256, activation="relu", W_constraint=maxnorm(3)))
+    # model.add(Dropout(0.2))
+    # model.add(Dense(128, activation="relu", W_constraint=maxnorm(3)))
+    # model.add(Dropout(0.2))
+    # model.add(Dense(1))
+    #
+    # model.add(Dense(512, input_dim=XTrain.shape[-1], activation="relu", W_constraint=maxnorm(3)))
+    # model.add(Dense(256, activation="relu", W_constraint=maxnorm(3)))
+    # model.add(Dense(1))
 
-    model.add(Dropout(0.2))
-    model.add(Dense(256, activation="relu", W_constraint=maxnorm(3)))
-    model.add(Dropout(0.2))
+    model.add(Dense(256, input_dim=XTrain.shape[-1], activation="relu", W_constraint=maxnorm(3)))
     model.add(Dense(128, activation="relu", W_constraint=maxnorm(3)))
-    model.add(Dropout(0.2))
-    model.add(Dense(1))
-
-    model.add(Dense(512, input_dim=XTrain.shape[-1], activation="relu", W_constraint=maxnorm(3)))
-    model.add(Dense(256, activation="relu", W_constraint=maxnorm(3)))
+    model.add(Dense(32, activation="relu", W_constraint=maxnorm(3)))
     model.add(Dense(1))
 
     epochNum = 5
@@ -215,11 +220,6 @@ def train_net(XTrain, yTrain, XVal, yVal, patchSize):
     optimizer = keras.optimizers.RMSprop(lr=learningRate)
     model.compile(loss='mse', optimizer=optimizer)
     print("Finished compiling the net in {:.3f} s.".format(time.time() - timeStart))
-
-    # XTrain = XTrain.reshape((XTrain.shape[0], -1))
-    # yTrain = yTrain.reshape((yTrain.shape[0], -1))
-    # XVal = XVal.reshape((XVal.shape[0], -1))
-    # yVal = yVal.reshape((yVal.shape[0], -1))
 
     history = model.fit(XTrain, yTrain, validation_data=(XVal, yVal), nb_epoch=epochNum, batch_size=batchSize,
                         verbose=0)
@@ -233,13 +233,15 @@ def train_net(XTrain, yTrain, XVal, yVal, patchSize):
 
 
 def predict_frame(data, header, targetFrame, timeWindow, targetFeature, features):
-    patchSize = (2, 16, 16)
+    patchSize = (4, 16, 16)
+    # Whether should collapse all spatial and temporal dimensions and use a 1D vector representation.
+    flattenInput = True
 
     featureIndices = [header.index(f) for f in features]
     data = data[targetFrame - timeWindow:targetFrame + 1, :, :, featureIndices]
 
     patchNumber = (
-        (data.shape[0] - patchSize[0] + 1 - 1),  # We want to predict the next frame, so we can't use the last frame
+        (data.shape[0] - patchSize[0] + 1 - 1),  # We want to predict the next frame, so we can't use the last frame // todo actually, I think I should include it, since we later 'cut off' the test data.
         (data.shape[1] - patchSize[1] + 1),
         (data.shape[2] - patchSize[2] + 1))
     patchNumberFlat = patchNumber[0] * patchNumber[1] * patchNumber[2]
@@ -255,6 +257,10 @@ def predict_frame(data, header, targetFrame, timeWindow, targetFeature, features
                                                x + int(patchSize[1] / 2),
                                                y + int(patchSize[2] / 2),
                                                features.index(targetFeature)]
+
+    if flattenInput:
+        netDataX = netDataX.reshape((patchNumberFlat, -1))
+        netDataY = netDataY.reshape((patchNumberFlat, -1))
 
     startTestIndex = (patchNumber[0] - 1) * patchNumber[1] * patchNumber[2]
 
@@ -277,8 +283,7 @@ def predict_frame(data, header, targetFrame, timeWindow, targetFeature, features
     model, history = train_net(XTrain, yTrain, XVal, yVal, patchSize)
     XTest = normalizerX.scale(netDataX[startTestIndex:,...])
     yTest = netDataY[startTestIndex:, ...]
-    # .reshape((netDataY.shape[0] - startTestIndex, -1))  # flatten for a simpler net
-    # .reshape((netDataX.shape[0] - startTestIndex, -1))  # flatten for a simpler net
+
     prediction = model.predict(XTest)
     testScore = model.evaluate(XTest, yTest, verbose=0)
     print("Test score: {}".format(testScore))
@@ -297,17 +302,19 @@ def predict_frame(data, header, targetFrame, timeWindow, targetFeature, features
     return predictionImage, testScore
 
 
-def predict(data, header, frameMap):
-    timeWindow = 4
+def predict(dataset):
+    timeWindow = 6
+
+    data, header, frameMap, *r = dataset.unpack_vars()
 
     vmin = -0.5
     vmax = 0.5
-    pdf = PdfPages('out\prediction.pdf')
+    pdf = PdfPages('..\out\prediction.pdf')
     fig = plt.figure()
     axes = [fig.add_subplot(2, 4, i + 1) for i in range(0, 8)]
 
-    # for frameIndex in range(data.shape[0] - 2, data.shape[0] - 1):
-    for frameIndex in range(timeWindow + 1, data.shape[0]):
+    for frameIndex in range(int(data.shape[0] / 2 + timeWindow - 1), int(data.shape[0] / 2)):
+    # for frameIndex in range(timeWindow + 1, data.shape[0]):
         print("Making a prediction for frame {}".format(frameIndex))
         timeStart = time.time()
 
@@ -475,7 +482,7 @@ def plot_data(dataset):
     data, header, frameMap, *r = dataset.unpack_vars()
 
     # Prepare for plotting
-    pdf = PdfPages('out\data.pdf')
+    pdf = PdfPages('..\out\data.pdf')
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
 
@@ -618,12 +625,15 @@ def main():
     augment_data(dataset)
     print("Data augmented in {:.3f} s.".format(time.time() - timeStart))
 
-    timeStart = time.time()
-    print("Plotting the data.")
-    plot_data(dataset)
-    print("Data plotted in {:.3f} s.".format(time.time() - timeStart))
+    # timeStart = time.time()
+    # print("Plotting the data.")
+    # plot_data(dataset)
+    # print("Data plotted in {:.3f} s.".format(time.time() - timeStart))
 
-    # predict(data, header, frameMap)
+    timeStart = time.time()
+    print("Making a prediction.")
+    predict(dataset)
+    print("Prediction finihsed in {:.3f} s.".format(time.time() - timeStart))
 
     # https://github.com/tensorflow/tensorflow/issues/3388
     # keras.backend.clear_session()
