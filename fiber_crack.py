@@ -7,7 +7,7 @@ np.random.seed(13)  # Fix the seed for reproducibility.
 import time
 import warnings
 
-from FiberCrack.Normalizer import Normalizer
+from Normalizer import Normalizer
 from data_loading import readDataFromCsv
 import os, math
 import re
