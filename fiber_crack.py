@@ -21,17 +21,17 @@ import scipy.ndimage.morphology
 from keras.layers import Dense
 from keras.constraints import maxnorm
 from PIL import Image
-
 from os import path
+import h5py
 
 ############### Configuration ###############
 
 
-basePath = 'W:\Experiments\Steel-Epoxy'
-metadataFilename = 'Steel-Epoxy.csv'
-dataDir = 'data_export_tstep3'
-imageDir = 'raw_images'
-imageBaseName = 'Spec054'
+# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
+# metadataFilename = 'Steel-Epoxy.csv'
+# dataDir = 'data_export_tstep3'
+# imageDir = 'raw_images'
+# imageBaseName = 'Spec054'
 
 # basePath = 'W:\Experiments\Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
@@ -39,12 +39,13 @@ imageBaseName = 'Spec054'
 # imageDir = 'raw_images'
 # imageBaseName = 'Spec010'
 
-# basePath = 'W:\Experiments\PTFE-Epoxy'
-# metadataFilename = 'PTFE-Epoxy.csv'
-# dataDir = 'data_export'
-# imageDir = 'raw_images'
-# imageBaseName = 'Spec048'
+basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
+metadataFilename = 'PTFE-Epoxy.csv'
+dataDir = 'data_export_fine'
+imageDir = 'raw_images'
+imageBaseName = 'Spec048'
 
+maxFrames = 99999
 reloadOriginalData = False
 
 
@@ -56,59 +57,85 @@ reloadOriginalData = False
 
 
 class Dataset:
-    data = None
-    header = None
-    frameMap = None
-    metadata = None
-    metaheader = None
+    h5Data = None
+    h5Header = None
+    h5FrameMap = None
+    h5Metadata = None
+    h5Metaheader = None
 
-    def __init__(self, data, header, frameMap, metadata, metaheader):
-        self.data = data
-        self.header = header
-        self.frameMap = frameMap
-        self.metadata = metadata
-        self.metaheader = metaheader
+    def __init__(self, h5File):
+        self.h5Data = h5File['data']
+        self.h5Header = h5File['header']
+        self.h5FrameMap = h5File['frameMap']
+        self.h5Metadata = h5File['metadata']
+        self.h5Metaheader = h5File['metaheader']
 
     def unpack_vars(self):
-        return self.data, self.header, self.frameMap, self.metadata, self.metaheader
+        header = self.get_header()
+        frameMap = self.h5FrameMap[:].tolist()
+        metadata = self.h5Metadata[:].tolist()
+        metaheader = self.get_metaheader()
+        return self.h5Data, header, frameMap, metadata, metaheader
 
-    def append_to_data(self, newColumn, newColumnName):
-        # assert(newColumn.ndim == 3)
-        assert (newColumn.shape == self.data.shape[0:-1])
+    def append_column(self, newColumnName):
+        # Make sure we still have preallcoated space available.
+        assert(self.h5Data.shape[-1] > self.h5Header.shape[0])
 
-        self.data = np.concatenate((self.data, newColumn[..., np.newaxis]), axis=-1)
-        self.header.append(newColumnName)
+        self.h5Header.resize((self.h5Header.shape[0] + 1,))
+        self.h5Header[-1] = newColumnName.encode('ascii')
+
+        newColumnIndex = self.h5Header.shape[0] - 1
+        return newColumnIndex
 
     def get_image_shift(self):
-        indices = [self.metaheader.index('imageShiftX'), self.metaheader.index('imageShiftY')]
-        return self.metadata[:, indices].astype(np.int)
+        metaheader = self.get_metaheader()
+        indices = [metaheader.index('imageShiftX'), metaheader.index('imageShiftY')]
+        return self.h5Metadata[:, indices].astype(np.int)
 
     def get_frame_size(self):
-        return tuple(self.data.shape[1:3])
+        return tuple(self.h5Data.shape[1:3])
+
+    def get_header(self):
+        return self.h5Header[:].astype(np.str).tolist()
+
+    def get_metaheader(self):
+        return self.h5Metaheader[:].astype(np.str).tolist()
 
 
 def load_data():
-    # Load the metadata, describing each frame of the experiment.
-    metadata, metaheader = readDataFromCsv(path.join(basePath, metadataFilename))
-    frameMap = []
-    data = None
-    header = None
-    preloadedDataFilename = metadataFilename.replace('.csv', '.npy')
-    preloadedMetadataFilename = metadataFilename.replace('.csv', '.pickle')
-    if reloadOriginalData or not path.isfile(path.join(basePath, preloadedDataFilename)):
+    h5Filename = metadataFilename.replace('.csv', '.hdf5')
+    h5File = None
+
+    if reloadOriginalData or not path.isfile(path.join(basePath, h5Filename)):
+        print('Loading data from CSV files.')
+
+        # We need to know the size of data that will be added later to allocate an hdf5 file.
+        extraFeatureNumber = augment_data_extra_feature_number()
+        originalFeatureNumber = None
+
+        # Load the metadata, describing each frame of the experiment.
+        metadata, metaheader = readDataFromCsv(path.join(basePath, metadataFilename))
+
+        dataFilenameList = os.listdir(path.join(basePath, dataDir))
+        frameNumber = min(len(dataFilenameList), maxFrames)
+
+        h5File = h5py.File(path.join(basePath, h5Filename), 'w')
+        h5Data = None
+        frameMap = []
+        header = None
+
         # Load data for each available frame.
-        for filename in os.listdir(path.join(basePath, dataDir)):
+        for i, filename in enumerate(dataFilenameList):
+
+            if i >= frameNumber:
+                break
+
             filepath = path.join(basePath, dataDir, filename)
             frameData, frameHeader = readDataFromCsv(filepath)
-
-            # Extract the frame index from the filename (not all frames are there)
-            regexMatch = re.search('[^\-]+-(\d+).*', filename)
-            frameIndex = int(regexMatch.group(1))
 
             # Figure out the size of the frame.
             # Count its width by finding where the value of 'y' changes the first time.
             frameWidth = 0
-            frameMap.append(frameIndex)
             yIndex = frameHeader.index('y')
             for row in frameData:
                 if int(row[yIndex]) != int(frameData[0, yIndex]):
@@ -118,37 +145,42 @@ def load_data():
             frameSize = (frameWidth, int(frameData.shape[0] / frameWidth))
             frameData = frameData.reshape((frameSize[1], frameSize[0], -1)).swapaxes(0, 1)
 
-            # Stack the data along the first axis
-            appendedData = frameData[np.newaxis, :, :]
-
-            if data is None:
-                data = appendedData
+            if h5Data is None:
+                dataShape = (frameNumber, frameData.shape[0], frameData.shape[1], frameData.shape[2] + extraFeatureNumber)
+                originalFeatureNumber = frameData.shape[2]
+                h5Data = h5File.create_dataset('data', dataShape, dtype='float32')
                 header = frameHeader
+
+            # Check the data dimensions.
+            expectedDataShape = (h5Data.shape[1], h5Data.shape[2], originalFeatureNumber)
+            if frameData.shape == expectedDataShape:
+                h5Data[i, ..., 0:originalFeatureNumber] = frameData
+
+                # Extract the frame index from the filename (not all frames are there)
+                regexMatch = re.search('[^\-]+-(\d+).*', filename)
+                frameIndex = int(regexMatch.group(1))
+                frameMap.append(frameIndex)
             else:
-                if frameData.shape == tuple(data.shape[1:]):
-                    data = np.concatenate((data, appendedData), 0)
-                else:
-                    frameMap.pop()
-                    warnings.warn("Frame data has wrong shape: {}, expected: {}".format(
-                        frameData.shape, tuple(data.shape[1:])))
+                warnings.warn("Frame data has wrong shape: {}, expected: {}".format(
+                    frameData.shape, expectedDataShape))
+
             print("Read {}".format(filename))
 
-        np.save(path.join(basePath, preloadedDataFilename), data)
-        with open(path.join(basePath, preloadedMetadataFilename), 'wb') as metadataFile:
-            pickle.dump((header, frameMap), metadataFile)
+        # Metadata describes all the frames, but we only have CSVs for some of them,
+        # so discard the redundant metadata.
+        metadata = metadata[frameMap, ...]
+
+        # Metadata and the headers are resizable, since we will augment the data later.
+        h5File.create_dataset('metadata', data=metadata, maxshape=(metadata.shape[0], None))
+        h5File.create_dataset('metaheader', data=np.array(metaheader, dtype='|S20'), maxshape=(None,))
+        h5File.create_dataset('header', data=np.array(header, dtype='|S20'), maxshape=(None,))
+        h5File.create_dataset('frameMap', data=frameMap)
+
     else:
-        print("Reading preloaded data from {}".format(preloadedDataFilename))
-        data = np.load(path.join(basePath, preloadedDataFilename))
-        # firstFilename = os.listdir(path.join(basePath, dataDir))[0]
-        # header = readHeaderFromCsv(path.join(basePath, dataDir, firstFilename))
-        with open(path.join(basePath, preloadedMetadataFilename), 'rb') as metadataFile:
-            header, frameMap = pickle.load(metadataFile)
+        print("Reading preloaded data from {}".format(h5Filename))
+        h5File = h5py.File(path.join(basePath, h5Filename), 'r+')
 
-    # Metadata describes all the frames, but we only have CSVs for some of them,
-    # so discard the redundant metadata.
-    metadata = metadata[frameMap, ...]
-
-    return Dataset(data, header, frameMap, metadata, metaheader)
+    return Dataset(h5File)
 
 
 def rgba_to_rgb(rgba):
@@ -231,7 +263,6 @@ def train_net(XTrain, yTrain, XVal, yVal, patchSize):
     return model, history
 
 
-
 def predict_frame(data, header, targetFrame, timeWindow, targetFeature, features):
     patchSize = (4, 16, 16)
     # Whether should collapse all spatial and temporal dimensions and use a 1D vector representation.
@@ -303,6 +334,8 @@ def predict_frame(data, header, targetFrame, timeWindow, targetFeature, features
 
 
 def predict(dataset):
+    raise RuntimeError('Code not tested since refactoring to H5Py.')
+
     timeWindow = 6
 
     data, header, frameMap, *r = dataset.unpack_vars()
@@ -372,13 +405,14 @@ def append_camera_image(dataset):
     :return:
     """
 
-    data, header, frameMap, *r = dataset.unpack_vars()
+    h5Data, header, frameMap, *r = dataset.unpack_vars()
     imageShift = dataset.get_image_shift()
 
     min, max, step = compute_data_image_mapping(dataset)
 
-    cameraImageData = np.zeros(tuple(data.shape[0:3]))
-    for f in range(0, data.shape[0]):
+    columnIndex = dataset.append_column('camera')
+    for f in range(0, h5Data.shape[0]):
+        print("Frame {}/{}".format(frameMap[f], frameMap[-1]))
         frameIndex = frameMap[f]
         cameraImagePath = path.join(basePath, imageDir, '{}-{:04d}_0.tif'.format(imageBaseName, frameIndex))
         cameraImageAvailable = os.path.isfile(cameraImagePath)
@@ -389,31 +423,28 @@ def append_camera_image(dataset):
 
             size = ((relMax - relMin) / step).astype(np.int)
             cameraImage = skimage.util.img_as_float(Image.open(cameraImagePath))
-            cameraImageData[f, 0:size[0], 0:size[1]] = \
+            h5Data[f, 0:size[0], 0:size[1], columnIndex] = \
                 np.array(cameraImage)[relMin[1]:relMax[1]:step[1], relMin[0]:relMax[0]:step[0]].transpose()
-
-    dataset.append_to_data(cameraImageData, 'camera')
 
     return dataset
 
 
 def append_matched_pixels(dataset):
-    data, header, frameMap, *r = dataset.unpack_vars()
+    h5Data, header, frameMap, *r = dataset.unpack_vars()
     imageShift = dataset.get_image_shift()
     frameSize = dataset.get_frame_size()
     min, max, step = compute_data_image_mapping(dataset)
 
-    matchedPixels = np.zeros(tuple(data.shape[0:3]))
-    for f in range(0, data.shape[0]):
-        frameFlow = data[f, :, :, :][:, :, [header.index('u'), header.index('v'), header.index('sigma')]]
+    columnIndex = dataset.append_column('matched')
+    for f in range(0, h5Data.shape[0]):
+        print("Frame {}/{}".format(frameMap[f], frameMap[-1]))
+        frameFlow = h5Data[f, :, :, :][:, :, [header.index('u'), header.index('v'), header.index('sigma')]]
         for x in range(0, frameSize[0]):
             for y in range(0, frameSize[1]):
                 newX = x + int(round((frameFlow[x, y, 0] - imageShift[f, 0]) / step[0]))
                 newY = y + int(round((frameFlow[x, y, 1] - imageShift[f, 1]) / step[1]))
                 if (0 < newX < frameSize[0]) and (0 < newY < frameSize[1]):
-                    matchedPixels[f, newX, newY] = 1.0
-
-    dataset.append_to_data(matchedPixels, 'matched')
+                    h5Data[f, newX, newY, columnIndex] = 1.0
 
 
 def compute_data_image_mapping(dataset):
@@ -445,19 +476,19 @@ def compute_avg_flow(dataset):
     :return:
     """
 
-    data, header, *r = dataset.unpack_vars()
+    h5Data, header, *r = dataset.unpack_vars()
 
     # Select points which will be sampled to determine the overall shift relative to the ref. frame
     # (This is used to align the camera image with the reference frame (i.e. data space)
-    sampleX = np.linspace(0 + 20, data.shape[1] - 20, 4)
-    sampleY = np.linspace(0 + 20, data.shape[2] - 20, 4)
+    sampleX = np.linspace(0 + 20, h5Data.shape[1] - 20, 4)
+    sampleY = np.linspace(0 + 20, h5Data.shape[2] - 20, 4)
     samplePointsX, samplePointsY = np.array(np.meshgrid(sampleX, sampleY)).astype(np.int)
     # Convert to an array of 2d points.
     samplePoints = np.concatenate((samplePointsX[:, :, np.newaxis], samplePointsY[:, :, np.newaxis]), 2).reshape(-1, 2)
 
-    avgFlow = np.empty((data.shape[0], 2))
-    for f in range(0, data.shape[0]):
-        frameData = data[f, ...]
+    avgFlow = np.empty((h5Data.shape[0], 2))
+    for f in range(0, h5Data.shape[0]):
+        frameData = h5Data[f, ...]
         samples = np.array([frameData[tuple(p)] for p in samplePoints])
         uvSamples = samples[:, [header.index('u'), header.index('v'), header.index('sigma')]]
         uvSamples = uvSamples[uvSamples[:, 2] >= 0, :]  # Filter out points that lost tracking
@@ -467,27 +498,53 @@ def compute_avg_flow(dataset):
     return avgFlow
 
 
-def augment_data(dataset):
-    imageShift = compute_avg_flow(dataset)
-    dataset.metadata = np.concatenate((dataset.metadata, imageShift[:, 0, None], imageShift[:, 1, None]), axis=1)
-    dataset.metaheader.extend(['imageShiftX', 'imageShiftY'])
+def augment_data_extra_feature_number():
+    # When allocating a continuous hdf5 file we need to know the final size
+    # of the data in advance.
 
+    return 2
+
+
+def augment_data(dataset):
+    header = dataset.get_header()
+    metaheader = dataset.get_metaheader()
+
+    if 'imageShiftX' in metaheader and 'camera' in header and 'matched' in header:
+        print("Data already augmented, skipping.")
+        return dataset
+
+    # For now we require that all the data is present, or none of it.
+    assert('imageShiftX' not in metaheader)
+    assert('camera' not in header)
+    assert('matched' in header)
+
+    imageShift = compute_avg_flow(dataset)
+
+    # Add two columns to the metadata.
+    dataset.h5Metadata.resize((dataset.h5Metadata.shape[0], dataset.h5Metadata.shape[1] + 2))
+    dataset.h5Metaheader.resize((dataset.h5Metaheader.shape[0] + 2,))
+
+    dataset.h5Metadata[:, [-2, -1]] = imageShift
+    dataset.h5Metaheader[[-2, -1]] = [b'imageShiftX', b'imageShiftY']
+
+    print("Adding the camera image...")
     append_camera_image(dataset)
+    print("Adding the matched pixels...")
     append_matched_pixels(dataset)
 
     return dataset
 
 
 def plot_data(dataset):
-    data, header, frameMap, *r = dataset.unpack_vars()
+    h5Data, header, frameMap, *r = dataset.unpack_vars()
 
     # Prepare for plotting
-    pdf = PdfPages('..\out\data.pdf')
+    pdf = PdfPages('../../out/fiber-crack.pdf')
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
 
     # Draw the color wheel
-    colorWheel = np.empty((data.shape[1], data.shape[2], 3))
+    colorWheel = np.empty((h5Data.shape[1], h5Data.shape[2], 3))
     for x in range(0, colorWheel.shape[0]):
         for y in range(0, colorWheel.shape[1]):
             angle = math.atan2(y - colorWheel.shape[1] / 2, x - colorWheel.shape[0] / 2)
@@ -508,17 +565,17 @@ def plot_data(dataset):
     fig.subplots_adjust(hspace=0.025, wspace=0.025)
 
     # Draw the frame plots.
-    for f in range(0, data.shape[0]):
+    for f in range(0, h5Data.shape[0]):
         frameIndex = frameMap[f]
         print("Frame {}".format(frameIndex))
         fig.suptitle("Frame {}".format(frameIndex))
 
-        frameData = data[f, :, :, :]
+        frameData = h5Data[f, :, :, :]
         frameWidth = frameData.shape[0]
         frameHeight = frameData.shape[1]
 
-        matchedPixels = data[f, :, :, header.index('matched')]
-        cameraImageData = data[f, :, :, header.index('camera')]
+        matchedPixels = h5Data[f, :, :, header.index('matched')]
+        cameraImageData = h5Data[f, :, :, header.index('camera')]
 
         # print("W-plot")
         imageData0 = frameData[:, :, header.index('W')]
@@ -615,25 +672,26 @@ def plot_data(dataset):
 
 
 def main():
+
     timeStart = time.time()
     print("Loading the data.")
     dataset = load_data()
-    print("Data loaded in {:.3f} s. Shape: {} Columns: {}".format(time.time() - timeStart, dataset.data.shape, dataset.header))
+    print("Data loaded in {:.3f} s. Shape: {} Columns: {}".format(time.time() - timeStart, dataset.h5Data.shape, dataset.get_header()))
 
     timeStart = time.time()
     print("Augmenting the data.")
     augment_data(dataset)
     print("Data augmented in {:.3f} s.".format(time.time() - timeStart))
 
-    # timeStart = time.time()
-    # print("Plotting the data.")
-    # plot_data(dataset)
-    # print("Data plotted in {:.3f} s.".format(time.time() - timeStart))
-
     timeStart = time.time()
-    print("Making a prediction.")
-    predict(dataset)
-    print("Prediction finihsed in {:.3f} s.".format(time.time() - timeStart))
+    print("Plotting the data.")
+    plot_data(dataset)
+    print("Data plotted in {:.3f} s.".format(time.time() - timeStart))
+
+    # timeStart = time.time()
+    # print("Making a prediction.")
+    # predict(dataset)
+    # print("Prediction finihsed in {:.3f} s.".format(time.time() - timeStart))
 
     # https://github.com/tensorflow/tensorflow/issues/3388
     # keras.backend.clear_session()
