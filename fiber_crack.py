@@ -155,7 +155,8 @@ def load_data():
             assert(frameData.shape[2] == len(frameHeader))
 
             if h5Data is None:
-                dataShape = (frameNumber, frameData.shape[0], frameData.shape[1], frameData.shape[2] + extraFeatureNumber)
+                dataShape = (
+                frameNumber, frameData.shape[0], frameData.shape[1], frameData.shape[2] + extraFeatureNumber)
                 originalFeatureNumber = frameData.shape[2]
                 h5Data = h5File.create_dataset('data', dataShape, dtype='float32')
                 header = frameHeader
@@ -197,22 +198,24 @@ def rgba_to_rgb(rgba):
     return np.array([rgba[0] * a, rgba[1] * a, rgba[2] * a])
 
 
-def color_map_hsv(xCol, yCol, maxNorm, sigmaIndex=-1):
-    def result(row):
-        # Paint black the pixels that lost tracking
-        if sigmaIndex != -1 and row[sigmaIndex] < 0:
-            return [0.0, 0.0, 0.0]
+def color_map_hsv(X, Y, maxNorm):
+    assert(X.ndim == 2)
+    assert(X.shape == Y.shape)
 
-        dir = row[[xCol, yCol]]
-        norm = np.linalg.norm(dir)
-        if norm > maxNorm:
-            raise ValueError("Encountered norm of {} while {} was specified as max!".format(norm, maxNorm))
+    result = np.empty(X.shape + (3,))
+    for i in range(0, X.shape[0]):
+        for j in range(0, X.shape[1]):
+            x = X[i, j]
+            y = Y[i, j]
 
-        angle = math.atan2(dir[1], dir[0])
-        angle = angle if angle >= 0.0 else angle + 2 * math.pi  # Convert [-pi, pi] -> [0, 2*pi]
-        hue = angle / (2 * math.pi)  # Map [0, 2*pi] -> [0, 1]
-        rgb = list(colorsys.hsv_to_rgb(hue, 1.0, 1.0)) + [norm / maxNorm]
-        return rgba_to_rgb(rgb)
+            norm = math.sqrt(x * x + y * y)
+            angle = math.atan2(y, x)
+            angle = angle if angle >= 0.0 else angle + 2 * math.pi  # Convert [-pi, pi] -> [0, 2*pi]
+            hue = angle / (2 * math.pi)  # Map [0, 2*pi] -> [0, 1]
+            rgb = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+            a = norm / maxNorm
+
+            result[i, j, :] = [rgb[0] * a, rgb[1] * a, rgb[2] * a]
 
     return result
 
@@ -420,8 +423,9 @@ def append_camera_image(dataset):
     min, max, step = compute_data_image_mapping(dataset)
 
     columnIndex = dataset.append_column('camera')
-    for f in range(0, h5Data.shape[0]):
-        print("Frame {}/{}".format(f, h5Data.shape[0]))
+    frameNumber = h5Data.shape[0]
+    for f in range(0, frameNumber):
+        print("Frame {}/{}".format(f, frameNumber))
         frameIndex = frameMap[f]
         cameraImagePath = path.join(basePath, imageDir, '{}-{:04d}_0.tif'.format(imageBaseName, frameIndex))
         cameraImageAvailable = os.path.isfile(cameraImagePath)
@@ -445,8 +449,9 @@ def append_matched_pixels(dataset):
     min, max, step = compute_data_image_mapping(dataset)
 
     columnIndex = dataset.append_column('matched')
-    for f in range(0, h5Data.shape[0]):
-        print("Frame {}/{}".format(f, h5Data.shape[0]))
+    frameNumber = h5Data.shape[0]
+    for f in range(0, frameNumber):
+        print("Frame {}/{}".format(f, frameNumber))
         frameFlow = h5Data[f, :, :, :][:, :, [header.index('u'), header.index('v'), header.index('sigma')]]
         for x in range(0, frameSize[0]):
             for y in range(0, frameSize[1]):
@@ -628,8 +633,9 @@ def plot_data(dataset):
         axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
 
         # print("UV-plot")
-        colorMap = color_map_hsv(header.index('U'), header.index('V'), 2.0, -1)
-        axes[1].imshow(np.apply_along_axis(colorMap, 2, frameData).swapaxes(0, 1), origin='lower', cmap='gray')
+        axes[1].imshow(color_map_hsv(frameData[..., header.index('U')],
+                                     frameData[..., header.index('V')], maxNorm=2.0)
+                       .swapaxes(0, 1), origin='lower', cmap='gray')
 
         # print("Sigma-plot")
         axes[2].imshow(frameData[:, :, header.index('sigma')].transpose(), origin='lower', cmap='gray')
