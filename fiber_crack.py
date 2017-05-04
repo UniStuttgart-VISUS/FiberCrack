@@ -24,7 +24,11 @@ from PIL import Image
 from os import path
 import h5py
 
+from numpy_extras import slice_nd
+
 ############### Configuration ###############
+
+preloadedDataDir = 'C:\\preloaded_data'
 
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
@@ -33,7 +37,7 @@ import h5py
 # imageDir = 'raw_images'
 # imageBaseName = 'Spec054'
 
-# basePath = 'W:\Experiments\Steel-ModifiedEpoxy'
+# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
 # dataDir = 'data_export'
 # imageDir = 'raw_images'
@@ -41,7 +45,8 @@ import h5py
 
 basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
 metadataFilename = 'PTFE-Epoxy.csv'
-dataDir = 'data_export_fine'
+dataDir = 'data_export'
+# dataDir = 'data_export_fine'
 imageDir = 'raw_images'
 imageBaseName = 'Spec048'
 
@@ -106,7 +111,8 @@ def load_data():
     h5Filename = metadataFilename.replace('.csv', '.hdf5')
     h5File = None
 
-    if reloadOriginalData or not path.isfile(path.join(basePath, h5Filename)):
+    preloadedDataPath = path.join(preloadedDataDir, h5Filename)
+    if reloadOriginalData or not path.isfile(preloadedDataPath):
         print('Loading data from CSV files.')
 
         # We need to know the size of data that will be added later to allocate an hdf5 file.
@@ -119,7 +125,7 @@ def load_data():
         dataFilenameList = os.listdir(path.join(basePath, dataDir))
         frameNumber = min(len(dataFilenameList), maxFrames)
 
-        h5File = h5py.File(path.join(basePath, h5Filename), 'w')
+        h5File = h5py.File(preloadedDataPath, 'w')
         h5Data = None
         frameMap = []
         header = None
@@ -145,6 +151,9 @@ def load_data():
             frameSize = (frameWidth, int(frameData.shape[0] / frameWidth))
             frameData = frameData.reshape((frameSize[1], frameSize[0], -1)).swapaxes(0, 1)
 
+            # Make sure we don't have any extra/missing data.
+            assert(frameData.shape[2] == len(frameHeader))
+
             if h5Data is None:
                 dataShape = (frameNumber, frameData.shape[0], frameData.shape[1], frameData.shape[2] + extraFeatureNumber)
                 originalFeatureNumber = frameData.shape[2]
@@ -161,7 +170,7 @@ def load_data():
                 frameIndex = int(regexMatch.group(1))
                 frameMap.append(frameIndex)
             else:
-                warnings.warn("Frame data has wrong shape: {}, expected: {}".format(
+                raise RuntimeError("Frame data has wrong shape: {}, expected: {}".format(
                     frameData.shape, expectedDataShape))
 
             print("Read {}".format(filename))
@@ -177,8 +186,8 @@ def load_data():
         h5File.create_dataset('frameMap', data=frameMap)
 
     else:
-        print("Reading preloaded data from {}".format(h5Filename))
-        h5File = h5py.File(path.join(basePath, h5Filename), 'r+')
+        print("Reading preloaded data from {}".format(preloadedDataPath))
+        h5File = h5py.File(preloadedDataPath, 'r+')
 
     return Dataset(h5File)
 
@@ -412,7 +421,7 @@ def append_camera_image(dataset):
 
     columnIndex = dataset.append_column('camera')
     for f in range(0, h5Data.shape[0]):
-        print("Frame {}/{}".format(frameMap[f], frameMap[-1]))
+        print("Frame {}/{}".format(f, h5Data.shape[0]))
         frameIndex = frameMap[f]
         cameraImagePath = path.join(basePath, imageDir, '{}-{:04d}_0.tif'.format(imageBaseName, frameIndex))
         cameraImageAvailable = os.path.isfile(cameraImagePath)
@@ -437,7 +446,7 @@ def append_matched_pixels(dataset):
 
     columnIndex = dataset.append_column('matched')
     for f in range(0, h5Data.shape[0]):
-        print("Frame {}/{}".format(frameMap[f], frameMap[-1]))
+        print("Frame {}/{}".format(f, h5Data.shape[0]))
         frameFlow = h5Data[f, :, :, :][:, :, [header.index('u'), header.index('v'), header.index('sigma')]]
         for x in range(0, frameSize[0]):
             for y in range(0, frameSize[1]):
@@ -445,6 +454,38 @@ def append_matched_pixels(dataset):
                 newY = y + int(round((frameFlow[x, y, 1] - imageShift[f, 1]) / step[1]))
                 if (0 < newX < frameSize[0]) and (0 < newY < frameSize[1]):
                     h5Data[f, newX, newY, columnIndex] = 1.0
+
+
+def plot_optic_flow(pdf, dataset, frameIndex):
+    h5Data, header, frameMap, *r = dataset.unpack_vars()
+    imageShift = dataset.get_image_shift()
+    frameSize = dataset.get_frame_size()
+    min, max, step = compute_data_image_mapping(dataset)
+
+    imageShift = imageShift[frameIndex]
+
+    frameFlow = h5Data[frameIndex, :, :, :][:, :, [header.index('u'), header.index('v')]]
+    frameFlow[:, :, 0] = np.rint((frameFlow[:, :, 0] - imageShift[0]) / step[0])
+    frameFlow[:, :, 1] = np.rint((frameFlow[:, :, 1] - imageShift[1]) / step[1])
+
+
+    # Shift the array to transform to the current frame coordinates.
+    cropMin = np.maximum(np.rint(imageShift / step).astype(np.int), 0)
+    cropMax = np.minimum(np.rint(frameSize + imageShift / step).astype(np.int), frameSize)
+    cropSize = cropMax - cropMin
+    plottedFlow = np.zeros(frameFlow.shape)
+    plottedFlow[0:cropSize[0], 0:cropSize[1], :] = frameFlow[cropMin[0]:cropMax[0], cropMin[1]:cropMax[1], :]
+    plottedFlow = plottedFlow.swapaxes(0, 1)
+
+    X, Y = np.meshgrid(np.arange(0, frameSize[0]), np.arange(0, frameSize[1]))
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    ax.quiver(X, Y, plottedFlow[:, :, 0], plottedFlow[:, :, 1], angles='uv', scale_units='xy', scale=1,
+              width=0.003, headwidth=2)
+    # pdf.savefig(fig)
+    # plt.cla()
+    plt.show()
 
 
 def compute_data_image_mapping(dataset):
@@ -455,14 +496,14 @@ def compute_data_image_mapping(dataset):
     :param dataset:
     :return: (min, max, step)
     """
-    data, header, *r = dataset.unpack_vars()
+    h5Data, header, *r = dataset.unpack_vars()
 
-    minX = int(data[0, 0, 0, header.index('x')])
-    maxX = int(data[0, -1, 0, header.index('x')])
-    minY = int(data[0, 0, 0, header.index('y')])
-    maxY = int(data[0, 0, -1, header.index('y')])
-    stepX = round((maxX - minX) / data.shape[1])
-    stepY = round((maxY - minY) / data.shape[2])
+    minX = int(h5Data[0, 0, 0, header.index('x')])
+    maxX = int(h5Data[0, -1, 0, header.index('x')])
+    minY = int(h5Data[0, 0, 0, header.index('y')])
+    maxY = int(h5Data[0, 0, -1, header.index('y')])
+    stepX = round((maxX - minX) / h5Data.shape[1])
+    stepY = round((maxY - minY) / h5Data.shape[2])
 
     return np.array([minX, minY]), np.array([maxX, maxY]), np.array([stepX, stepY])
 
@@ -516,7 +557,7 @@ def augment_data(dataset):
     # For now we require that all the data is present, or none of it.
     assert('imageShiftX' not in metaheader)
     assert('camera' not in header)
-    assert('matched' in header)
+    assert('matched' not in header)
 
     imageShift = compute_avg_flow(dataset)
 
@@ -555,6 +596,11 @@ def plot_data(dataset):
     fig.suptitle("Color Wheel")
     pdf.savefig(fig)
     plt.cla()
+
+    # plot_optic_flow(pdf, dataset, 130)
+    # pdf.close()
+    #
+    # return
 
     fig = plt.figure()
     axes = []
@@ -677,6 +723,9 @@ def main():
     print("Loading the data.")
     dataset = load_data()
     print("Data loaded in {:.3f} s. Shape: {} Columns: {}".format(time.time() - timeStart, dataset.h5Data.shape, dataset.get_header()))
+
+    min, max, step = compute_data_image_mapping(dataset)
+    print("Data to image mapping step: {}".format(step))
 
     timeStart = time.time()
     print("Augmenting the data.")
