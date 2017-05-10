@@ -212,10 +212,10 @@ def color_map_hsv(X, Y, maxNorm):
             angle = math.atan2(y, x)
             angle = angle if angle >= 0.0 else angle + 2 * math.pi  # Convert [-pi, pi] -> [0, 2*pi]
             hue = angle / (2 * math.pi)  # Map [0, 2*pi] -> [0, 1]
-            rgb = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-            a = norm / maxNorm
+            v = norm / maxNorm
+            rgb = colorsys.hsv_to_rgb(hue, 1.0, v)
 
-            result[i, j, :] = [rgb[0] * a, rgb[1] * a, rgb[2] * a]
+            result[i, j, :] = rgb
 
     return result
 
@@ -448,17 +448,39 @@ def append_matched_pixels(dataset):
     frameSize = dataset.get_frame_size()
     min, max, step = compute_data_image_mapping(dataset)
 
-    columnIndex = dataset.append_column('matched')
+    matchedColumnIndex = dataset.append_column('matched')
+    uBackColumnIndex = dataset.append_column('u_back')
+    vBackColumnIndex = dataset.append_column('v_back')
+
     frameNumber = h5Data.shape[0]
     for f in range(0, frameNumber):
+        matchedPixels = np.zeros(frameSize)
+        backwardFlow = np.zeros(frameSize + (2,))
         print("Frame {}/{}".format(f, frameNumber))
-        frameFlow = h5Data[f, :, :, :][:, :, [header.index('u'), header.index('v'), header.index('sigma')]]
+        frameFlow = h5Data[f, :, :, :][:, :, [header.index('u'), header.index('v')]]
         for x in range(0, frameSize[0]):
             for y in range(0, frameSize[1]):
                 newX = x + int(round((frameFlow[x, y, 0] - imageShift[f, 0]) / step[0]))
                 newY = y + int(round((frameFlow[x, y, 1] - imageShift[f, 1]) / step[1]))
                 if (0 < newX < frameSize[0]) and (0 < newY < frameSize[1]):
-                    h5Data[f, newX, newY, columnIndex] = 1.0
+                    matchedPixels[newX, newY] = 1.0
+                    backwardFlow[newX, newY, :] = (imageShift[f, :] - frameFlow[x, y, :]) / step
+
+        h5Data[f, ..., matchedColumnIndex] = matchedPixels
+        h5Data[f, ..., [uBackColumnIndex, vBackColumnIndex]] = backwardFlow
+
+
+def zero_pixels_without_tracking(dataset):
+    h5Data, header, frameMap, *r = dataset.unpack_vars()
+    # frameSize = dataset.get_frame_size()
+    for f in range(0, h5Data.shape[0]):
+        data = h5Data[f, ...]
+        filter = data[..., header.index('sigma')] >= 0
+        # flowIndices = [header.index('u'), header.index('v')]
+        data[..., header.index('u')] = filter * data[..., header.index('u')]
+        data[..., header.index('v')] = filter * data[..., header.index('v')]
+        h5Data[f, ...] = data
+        # todo is it faster to use an intermediate buffer? or should I write to hdf5 directly?
 
 
 def plot_optic_flow(pdf, dataset, frameIndex):
@@ -548,7 +570,7 @@ def augment_data_extra_feature_number():
     # When allocating a continuous hdf5 file we need to know the final size
     # of the data in advance.
 
-    return 2
+    return 4
 
 
 def augment_data(dataset):
@@ -578,7 +600,93 @@ def augment_data(dataset):
     print("Adding the matched pixels...")
     append_matched_pixels(dataset)
 
+    print("Zeroing the pixels that lost tracking.")
+    zero_pixels_without_tracking(dataset)
+
     return dataset
+
+
+def masked_gaussian_filter(data, sourceMask, targetMask, sigma):
+    """
+    Applies standard Gaussian blur on the data.
+    The source mask controls which pixels are sampled when computing the blurred pixel value.
+    The target mask control for which pixels do we compute the blur.
+    This can be used to 'fill-in' pixels in an image without affecting existing data.
+
+    :param data:
+    :param sourceMask:
+    :param targetMask:
+    :param sigma:
+    :return:
+    """
+    size = data.shape
+
+    assert(data.ndim == 2)
+    assert(sourceMask.shape == size)
+    assert(targetMask.shape == size)
+
+    def round_up_to_odd(value):
+        rounded = math.ceil(value)
+        return rounded if rounded % 2 == 1 else rounded + 1
+
+    kernelRadius = int(math.ceil(sigma * 3.0))
+    kernelWidth = 2 * kernelRadius + 1
+
+    # Precompute kernel values. No scaling constant, since we normalize anyway.
+    # Can't precompute the normalization, since we cherry pick values on the fly.
+    kernel = np.zeros(kernelWidth)
+    kernel[kernelRadius] = 1.0   # middle
+    sigmaSqr = sigma ** 2
+    for i in range(0, kernelRadius):
+        w = math.exp(-0.5 * float(i ** 2) / sigmaSqr)
+        kernel[kernelRadius + i] = w
+        kernel[kernelRadius - i] = w
+
+    def do_pass(source, target, sourceMask, targetMask, isHorizontal):
+        for x in range(0, size[0]):
+            for y in range(0, size[1]):
+                if not targetMask[x, y]:
+                    continue
+
+                minInput = [math.ceil(x - kernelRadius),
+                            math.ceil(y - kernelRadius)]
+                maxInput = [math.floor(x + kernelRadius),
+                            math.floor(y + kernelRadius)]
+
+                if isHorizontal:
+                    minInput[1] = maxInput[1] = y
+                else:
+                    minInput[0] = maxInput[0] = x
+
+
+                result = 0.0
+                weightSum = 0.0
+                for xi in range(minInput[0], maxInput[0] + 1):
+                    for yi in range(minInput[1], maxInput[1] + 1):
+                        isOutbound = xi < 0 or yi < 0 or \
+                                     xi > size[0] - 1 or yi > size[1] - 1
+                        if isOutbound:
+                            continue
+                        if not sourceMask[xi, yi]:
+                            continue
+
+                        kernelIndexShift = xi - x if isHorizontal else yi - y
+
+                        weight = kernel[kernelRadius + kernelIndexShift]
+                        result += source[xi, yi] * weight
+                        weightSum += weight
+
+                if weightSum > 0.0:
+                    result /= weightSum
+                    target[x, y] = result
+
+    firstPass = data.copy()
+    do_pass(data, firstPass, sourceMask, targetMask, True)
+    secondPass = firstPass.copy()
+    do_pass(firstPass, secondPass, np.ones(size), targetMask, False)
+
+    return secondPass
+
 
 
 def plot_data(dataset):
@@ -590,14 +698,13 @@ def plot_data(dataset):
     ax = fig.add_subplot(1, 1, 1)
 
     # Draw the color wheel
-    colorWheel = np.empty((h5Data.shape[1], h5Data.shape[2], 3))
+    colorWheel = np.empty((h5Data.shape[1], h5Data.shape[2], 2))
+    center = np.array(list(colorWheel.shape[0:2]), dtype=np.int) / 2
     for x in range(0, colorWheel.shape[0]):
         for y in range(0, colorWheel.shape[1]):
-            angle = math.atan2(y - colorWheel.shape[1] / 2, x - colorWheel.shape[0] / 2)
-            angle = angle if angle >= 0.0 else angle + 2 * math.pi  # Convert [-pi, pi] -> [0, 2*pi]
-            hue = angle / (2 * math.pi)  # Map [0, 2*pi] -> [0, 1]
-            colorWheel[x, y, :] = list(colorsys.hsv_to_rgb(hue, 1.0, 1.0))
-    ax.imshow(colorWheel.swapaxes(0, 1))
+            colorWheel[x, y, :] = (-center + [x, y]) / center
+
+    ax.imshow(color_map_hsv(colorWheel[..., 0], colorWheel[..., 1], 2.0).swapaxes(0, 1))
     fig.suptitle("Color Wheel")
     pdf.savefig(fig)
     plt.cla()
@@ -609,14 +716,15 @@ def plot_data(dataset):
 
     fig = plt.figure()
     axes = []
-    for f in range(0, 9):
-        axes.append(fig.add_subplot(3, 3, f + 1))
+    for f in range(0, 15):
+        axes.append(fig.add_subplot(3, 5, f + 1))
         axes[f].axis('off')
 
     fig.subplots_adjust(hspace=0.025, wspace=0.025)
 
     # Draw the frame plots.
     for f in range(0, h5Data.shape[0]):
+        timeStart = time.time()
         frameIndex = frameMap[f]
         print("Frame {}".format(frameIndex))
         fig.suptitle("Frame {}".format(frameIndex))
@@ -628,14 +736,20 @@ def plot_data(dataset):
         matchedPixels = h5Data[f, :, :, header.index('matched')]
         cameraImageData = h5Data[f, :, :, header.index('camera')]
 
+        assert isinstance(matchedPixels, np.ndarray)
+        assert isinstance(cameraImageData, np.ndarray)
+
         # print("W-plot")
         imageData0 = frameData[:, :, header.index('W')]
         axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
 
         # print("UV-plot")
-        axes[1].imshow(color_map_hsv(frameData[..., header.index('U')],
-                                     frameData[..., header.index('V')], maxNorm=2.0)
-                       .swapaxes(0, 1), origin='lower', cmap='gray')
+        # axes[1].imshow(color_map_hsv(frameData[..., header.index('U')],
+        #                              frameData[..., header.index('V')], maxNorm=2.0)
+        #                .swapaxes(0, 1), origin='lower', cmap='gray')
+        axes[1].imshow(color_map_hsv(frameData[..., header.index('u')],
+                                     frameData[..., header.index('v')], maxNorm=50.0)
+                       .swapaxes(0, 1), origin='lower')
 
         # print("Sigma-plot")
         axes[2].imshow(frameData[:, :, header.index('sigma')].transpose(), origin='lower', cmap='gray')
@@ -699,8 +813,8 @@ def plot_data(dataset):
             tempResult = skimage.morphology.binary_dilation(tempResult, selem)
             tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
             # Don't erode back: an extra round of dilation compensates for the kernel used during DIC.
-            # tempResult = skimage.morphology.binary_erosion(tempResult, selem)
-            # tempResult = skimage.morphology.binary_erosion(tempResult, selem)
+            tempResult = skimage.morphology.binary_dilation(tempResult, selem)
+            tempResult = skimage.morphology.binary_dilation(tempResult, selem)
 
             matchedPixelsGaussThresClean = tempResult
 
@@ -710,16 +824,41 @@ def plot_data(dataset):
         for n, contour in enumerate(contours):
             axes[8].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
+        uBack = frameData[..., header.index('u_back')]
+        vBack = frameData[..., header.index('v_back')]
+        axes[9].imshow(color_map_hsv(uBack, vBack, maxNorm=50.0).swapaxes(0, 1), origin='lower')
 
-        # axes[11].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
-        # contours = skimage.measure.find_contours(matchedPixelsMorph.transpose(), 0.8)
-        # for n, contour in enumerate(contours):
-        #     axes[11].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+        sourceMask = matchedPixels > 0.0
+        targetMask = matchedPixels == 0.0
+
+        uBackFilledIn = masked_gaussian_filter(uBack, sourceMask, targetMask, 50.0 / 3.0)
+        vBackFilledIn = masked_gaussian_filter(vBack, sourceMask, targetMask, 50.0 / 3.0)
+
+        axes[10].imshow(color_map_hsv(uBackFilledIn, vBackFilledIn, maxNorm=50.0).swapaxes(0, 1), origin='lower')
+        axes[11].imshow((uBackFilledIn ** 2 + vBackFilledIn ** 2).swapaxes(0, 1), origin='lower')
+
+        frameSize = frameData.shape[0:2]
+        matchedPixelsRef = np.zeros(frameSize)
+        for x in range(0, frameSize[0]):
+            for y in range(0, frameSize[1]):
+                if matchedPixelsGaussThresClean[x, y] == 1.0:
+                    continue
+
+                newX = int(round(x + uBackFilledIn[x, y]))
+                newY = int(round(y + vBackFilledIn[x, y]))
+                if newX >= 0 and newX < frameSize[0] and newY >= 0 and newY < frameSize[1]:
+                    matchedPixelsRef[newX, newY] = 1.0
+
+        axes[12].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
 
         pdf.savefig(fig, bbox_inches='tight')
         for a in axes:
             a.clear()
+
             a.axis('off')
+
+        print("Rendered in {:.2f} s.".format(time.time() - timeStart))
+
     pdf.close()
 
 
