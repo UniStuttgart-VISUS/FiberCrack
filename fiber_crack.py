@@ -7,7 +7,6 @@ np.random.seed(13)  # Fix the seed for reproducibility.
 import time
 import warnings
 
-from Normalizer import Normalizer
 from data_loading import readDataFromCsv
 import os, math
 import re
@@ -25,6 +24,8 @@ from os import path
 import h5py
 
 from numpy_extras import slice_nd
+from Normalizer import Normalizer
+from image_tools import masked_gaussian_filter
 
 ############### Configuration ###############
 
@@ -604,90 +605,6 @@ def augment_data(dataset):
     zero_pixels_without_tracking(dataset)
 
     return dataset
-
-
-def masked_gaussian_filter(data, sourceMask, targetMask, sigma):
-    """
-    Applies standard Gaussian blur on the data.
-    The source mask controls which pixels are sampled when computing the blurred pixel value.
-    The target mask control for which pixels do we compute the blur.
-    This can be used to 'fill-in' pixels in an image without affecting existing data.
-
-    :param data:
-    :param sourceMask:
-    :param targetMask:
-    :param sigma:
-    :return:
-    """
-    size = data.shape
-
-    assert(data.ndim == 2)
-    assert(sourceMask.shape == size)
-    assert(targetMask.shape == size)
-
-    def round_up_to_odd(value):
-        rounded = math.ceil(value)
-        return rounded if rounded % 2 == 1 else rounded + 1
-
-    kernelRadius = int(math.ceil(sigma * 3.0))
-    kernelWidth = 2 * kernelRadius + 1
-
-    # Precompute kernel values. No scaling constant, since we normalize anyway.
-    # Can't precompute the normalization, since we cherry pick values on the fly.
-    kernel = np.zeros(kernelWidth)
-    kernel[kernelRadius] = 1.0   # middle
-    sigmaSqr = sigma ** 2
-    for i in range(0, kernelRadius):
-        w = math.exp(-0.5 * float(i ** 2) / sigmaSqr)
-        kernel[kernelRadius + i] = w
-        kernel[kernelRadius - i] = w
-
-    def do_pass(source, target, sourceMask, targetMask, isHorizontal):
-        for x in range(0, size[0]):
-            for y in range(0, size[1]):
-                if not targetMask[x, y]:
-                    continue
-
-                minInput = [math.ceil(x - kernelRadius),
-                            math.ceil(y - kernelRadius)]
-                maxInput = [math.floor(x + kernelRadius),
-                            math.floor(y + kernelRadius)]
-
-                if isHorizontal:
-                    minInput[1] = maxInput[1] = y
-                else:
-                    minInput[0] = maxInput[0] = x
-
-
-                result = 0.0
-                weightSum = 0.0
-                for xi in range(minInput[0], maxInput[0] + 1):
-                    for yi in range(minInput[1], maxInput[1] + 1):
-                        isOutbound = xi < 0 or yi < 0 or \
-                                     xi > size[0] - 1 or yi > size[1] - 1
-                        if isOutbound:
-                            continue
-                        if not sourceMask[xi, yi]:
-                            continue
-
-                        kernelIndexShift = xi - x if isHorizontal else yi - y
-
-                        weight = kernel[kernelRadius + kernelIndexShift]
-                        result += source[xi, yi] * weight
-                        weightSum += weight
-
-                if weightSum > 0.0:
-                    result /= weightSum
-                    target[x, y] = result
-
-    firstPass = data.copy()
-    do_pass(data, firstPass, sourceMask, targetMask, True)
-    secondPass = firstPass.copy()
-    do_pass(firstPass, secondPass, np.ones(size), targetMask, False)
-
-    return secondPass
-
-
 
 def plot_data(dataset):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
