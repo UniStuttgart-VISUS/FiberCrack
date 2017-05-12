@@ -63,11 +63,6 @@ reloadOriginalData = False
 
 
 class Dataset:
-    h5Data = None
-    h5Header = None
-    h5FrameMap = None
-    h5Metadata = None
-    h5Metaheader = None
 
     def __init__(self, h5File):
         self.h5Data = h5File['data']
