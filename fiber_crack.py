@@ -908,6 +908,16 @@ def plot_data(dataset):
 
         axes[12].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
 
+        # Construct a sigma plot with compensation for the DIC kernel.
+        binarySigma = frameData[..., header.index('sigma')] >= 0
+        binarySigmaCompensated = binarySigma.copy()
+        binarySigmaCompensated = skimage.morphology.binary_dilation(binarySigmaCompensated, selem)
+        binarySigmaCompensated = skimage.morphology.binary_dilation(binarySigmaCompensated, selem)
+        binarySigmaCompensated = skimage.morphology.binary_dilation(binarySigmaCompensated, selem)
+        binarySigmaCompensated = skimage.morphology.binary_dilation(binarySigmaCompensated, selem)
+
+        axes[13].imshow(binarySigmaCompensated.transpose(), origin='lower', cmap='gray')
+
         pdf.savefig(fig, bbox_inches='tight', dpi=300)
         for a in axes:
             a.clear()
