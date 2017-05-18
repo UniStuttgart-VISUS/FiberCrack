@@ -7,7 +7,7 @@ np.random.seed(13)  # Fix the seed for reproducibility.
 import time
 import warnings
 
-from data_loading import readDataFromCsv
+from data_loading import readDataFromCsv, readDataFromTiff
 import os, math
 import re
 import matplotlib.pyplot as plt
@@ -29,8 +29,10 @@ from image_tools import masked_gaussian_filter
 
 ############### Configuration ###############
 
-preloadedDataDir = 'C:\\preloaded_data'
-
+preloadedDataDir = 'C:/preloaded_data'
+preloadedDataFilename = None  # By default, decide automatically.
+dataFormat = 'csv'
+imageFilenameFormat = '{}-{:04d}_0.tif'
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
 # metadataFilename = 'Steel-Epoxy.csv'
@@ -44,12 +46,29 @@ preloadedDataDir = 'C:\\preloaded_data'
 # imageDir = 'raw_images'
 # imageBaseName = 'Spec010'
 
-basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
-metadataFilename = 'PTFE-Epoxy.csv'
-dataDir = 'data_export'
-# dataDir = 'data_export_fine'
-imageDir = 'raw_images'
-imageBaseName = 'Spec048'
+# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
+# metadataFilename = 'PTFE-Epoxy.csv'
+# dataDir = 'data_export'
+# # dataDir = 'data_export_fine'
+# imageDir = 'raw_images'
+# imageBaseName = 'Spec048'
+
+# PTFE-Epoxy with fine spatial and temporal resolutions, mid-experiment.
+# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Spec48'
+# metadataFilename = '../PTFE-Epoxy/PTFE-Epoxy.csv'
+# dataDir = 'data_grid_sparse_filtered'
+# imageDir = '../PTFE-Epoxy/raw_images'
+# imageBaseName = 'Spec048'
+# preloadedDataFilename = 'PTFE-Epoxy-fine-mid.hdf5'
+
+dataFormat = 'tiff'
+basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/micro_epoxy-hole'
+dataDir = ''
+imageDir = ''
+imageBaseName = 'test'
+imageFilenameFormat = '{}_{:03d}.bmp'
+metadataFilename = ''
+preloadedDataFilename = 'micro_epoxy-hole'
 
 maxFrames = 99999
 reloadOriginalData = False
@@ -103,8 +122,12 @@ class Dataset:
         return self.h5Metaheader[:].astype(np.str).tolist()
 
 
-def load_data():
-    h5Filename = metadataFilename.replace('.csv', '.hdf5')
+def load_csv_data():
+    if preloadedDataFilename is None:
+        h5Filename = metadataFilename.replace('.csv', '.hdf5')
+    else:
+        h5Filename = preloadedDataFilename
+
     h5File = None
 
     preloadedDataPath = path.join(preloadedDataDir, h5Filename)
@@ -187,6 +210,126 @@ def load_data():
         h5File = h5py.File(preloadedDataPath, 'r+')
 
     return Dataset(h5File)
+
+
+def load_tiff_data():
+    """
+    Loads data from TIFF and BMP images.
+    A sequence of BMP images contains camera image at different time steps.
+    Each TIFF image contains data for one feature, with multiple frames in each file.
+    :return:
+    """
+
+    # Must specify the preloaded data file manually.
+    if preloadedDataFilename is None:
+        raise RuntimeError('Preloaded data filename is missing.')
+
+    h5Filename = preloadedDataFilename
+    h5File = None
+
+    preloadedDataPath = path.join(preloadedDataDir, h5Filename)
+    if reloadOriginalData or not path.isfile(preloadedDataPath):
+        print('Loading data from TIFF files.')
+
+        # We need to know the size of data that will be added later to allocate an hdf5 file.
+        extraFeatureNumber = augment_data_extra_feature_number()
+
+        # Files with feature data, each contains N frames, one per time step.
+        tiffFileMap = {
+            'exx': 'epsxx.tif',
+            'exy': 'epsxy.tif',
+            'eyy': 'epsyy.tif',
+            'u': 'u_smoothed.tif',
+            'v': 'v_smoothed.tif',
+            'sigma': 'zncc.tif',
+        }
+
+        # Peek into the files to determine the number of frames and size of 'data frames'.
+        firstFilePath = path.join(basePath, dataDir, tiffFileMap['exx'])
+        firstFileData = readDataFromTiff(firstFilePath)
+        frameNumber = firstFileData.shape[0]
+        dataFrameSize = firstFileData.shape[1:3]
+
+        # Peek into the camera images to determine camera image size. (Different from the data frame size.)
+        cameraImageFiles = []
+        for file in os.listdir(path.join(basePath, imageDir)):
+            if file.endswith('.bmp'):
+                cameraImageFiles.append(path.join(basePath, imageDir, file))
+
+        firstCameraImage = skimage.util.img_as_float(Image.open(cameraImageFiles[0]))
+        imageSize = firstCameraImage.shape
+
+        # Figure out which camera pixels are described in the data files. (The data resolution is much smaller.)
+        dataMappingStep = np.floor(np.asarray(imageSize) / np.asarray(dataFrameSize))
+        pixelsCoveredByData = dataMappingStep * dataFrameSize
+        minPixel = ((imageSize - pixelsCoveredByData) / 2).astype(np.int)
+        maxPixel = minPixel + pixelsCoveredByData
+
+        # There's no metadata accompanying tiff data, create empty arrays.
+        metadata = np.empty((frameNumber, 0))
+        metaheader = np.empty((0,))
+
+        # Create and initialize the data file and buffers.
+        h5File = h5py.File(preloadedDataPath, 'w')
+
+        originalFeatureNumber = len(tiffFileMap) + 2  # Plus x and y features that are generated manually.
+        dataShape = (frameNumber, dataFrameSize[0], dataFrameSize[1], originalFeatureNumber + extraFeatureNumber)
+
+        h5Data = h5File.create_dataset('data', dataShape, dtype='float32')
+        frameMap = np.arange(0, frameNumber)  # No missing frames for tiff data
+        header = []
+
+        # Load data for each available feature.
+        featureIndex = -1
+        for featureName, filename in tiffFileMap.items():
+            featureIndex += 1
+
+            filepath = path.join(basePath, dataDir, filename)
+            featureData = readDataFromTiff(filepath)
+            header.append(featureName)
+
+            # Check the data dimensions.
+            if featureData.shape[0:3] == dataShape[0:3]:
+                h5Data[..., featureIndex] = featureData
+            else:
+                raise RuntimeError("Frame data has wrong shape: {}, expected: {}".format(
+                    featureData.shape[0:3], dataShape[0:3]))
+
+            print("Read {}".format(filename))
+
+        print("Generating X and Y features")
+        # Manually generate the x and y features.
+        header.append('x')
+        header.append('y')
+
+        # It's faster to generate the full arrays in memory, and then copy, then to write each value individually.
+        xFeature = np.tile(np.arange(minPixel[0], maxPixel[0], dataMappingStep[0], dtype=np.float).reshape(-1, 1, 1),
+                           (1, dataShape[2], 1))
+        yFeature = np.tile(np.arange(minPixel[0], maxPixel[1], dataMappingStep[1], dtype=np.float).reshape(1, -1, 1),
+                           (dataShape[1], 1, 1))
+        featureIndex = originalFeatureNumber - 2
+        h5Data[:, :, :, featureIndex:featureIndex + 2] = np.concatenate((xFeature, yFeature), axis=2)
+
+        # Metadata and the headers are resizable, since we will augment the data later.
+        h5File.create_dataset('metadata', data=metadata, maxshape=(metadata.shape[0], None))
+        h5File.create_dataset('metaheader', data=np.array(metaheader, dtype='|S20'), maxshape=(None,))
+        h5File.create_dataset('header', data=np.array(header, dtype='|S20'), maxshape=(None,))
+        h5File.create_dataset('frameMap', data=frameMap)
+
+    else:
+        print("Reading preloaded data from {}".format(preloadedDataPath))
+        h5File = h5py.File(preloadedDataPath, 'r+')
+
+    return Dataset(h5File)
+
+
+def load_data():
+    if dataFormat == 'csv':
+        return load_csv_data()
+    elif dataFormat == 'tiff':
+        return load_tiff_data()
+    else:
+        raise ValueError("Unknown data format: {}".format(dataFormat))
 
 
 def rgba_to_rgb(rgba):
@@ -423,17 +566,18 @@ def append_camera_image(dataset):
     for f in range(0, frameNumber):
         print("Frame {}/{}".format(f, frameNumber))
         frameIndex = frameMap[f]
-        cameraImagePath = path.join(basePath, imageDir, '{}-{:04d}_0.tif'.format(imageBaseName, frameIndex))
+        cameraImagePath = path.join(basePath, imageDir, imageFilenameFormat.format(imageBaseName, frameIndex))
         cameraImageAvailable = os.path.isfile(cameraImagePath)
         if cameraImageAvailable:
-            # Crop a rectangle from the camera image, accounting for the overall shift of the specimen.
-            relMin = min + imageShift[f, ...]
-            relMax = max + imageShift[f, ...]
+            cameraImage = np.array(skimage.util.img_as_float(Image.open(cameraImagePath)))
 
-            size = ((relMax - relMin) / step).astype(np.int)
-            cameraImage = skimage.util.img_as_float(Image.open(cameraImagePath))
+            # Crop a rectangle from the camera image, accounting for the overall shift of the specimen.
+            relMin = np.clip(min + imageShift[f, ...], [0, 0], cameraImage.shape)
+            relMax = np.clip(max + imageShift[f, ...], [0, 0], cameraImage.shape)
+
+            size = np.ceil((relMax - relMin) / step).astype(np.int)
             h5Data[f, 0:size[0], 0:size[1], columnIndex] = \
-                np.array(cameraImage)[relMin[1]:relMax[1]:step[1], relMin[0]:relMax[0]:step[0]].transpose()
+                cameraImage[relMin[1]:relMax[1]:step[1], relMin[0]:relMax[0]:step[0]].transpose()
 
     return dataset
 
@@ -473,8 +617,8 @@ def zero_pixels_without_tracking(dataset):
         data = h5Data[f, ...]
         filter = data[..., header.index('sigma')] >= 0
         # flowIndices = [header.index('u'), header.index('v')]
-        data[..., header.index('u')] = filter * data[..., header.index('u')]
-        data[..., header.index('v')] = filter * data[..., header.index('v')]
+        data[..., header.index('u')] *= filter
+        data[..., header.index('v')] *= filter
         h5Data[f, ...] = data
         # todo is it faster to use an intermediate buffer? or should I write to hdf5 directly?
 
@@ -652,8 +796,9 @@ def plot_data(dataset):
         assert isinstance(cameraImageData, np.ndarray)
 
         # print("W-plot")
-        imageData0 = frameData[:, :, header.index('W')]
-        axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
+        if 'W' in header:
+            imageData0 = frameData[:, :, header.index('W')]
+            axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
 
         # print("UV-plot")
         # axes[1].imshow(color_map_hsv(frameData[..., header.index('U')],
@@ -763,7 +908,7 @@ def plot_data(dataset):
 
         axes[12].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
 
-        pdf.savefig(fig, bbox_inches='tight')
+        pdf.savefig(fig, bbox_inches='tight', dpi=300)
         for a in axes:
             a.clear()
 
