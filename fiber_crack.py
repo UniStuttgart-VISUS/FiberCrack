@@ -34,41 +34,55 @@ preloadedDataFilename = None  # By default, decide automatically.
 dataFormat = 'csv'
 imageFilenameFormat = '{}-{:04d}_0.tif'
 
+dicKernelSize = 55
+
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
 # metadataFilename = 'Steel-Epoxy.csv'
 # dataDir = 'data_export_tstep3'
 # imageDir = 'raw_images'
 # imageBaseName = 'Spec054'
+# dicKernelSize = 85
+
+# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
+# metadataFilename = 'Steel-Epoxy.csv'
+# dataDir = 'data_export'
+# imageDir = 'raw_images'
+# imageBaseName = 'Spec054'
+# dicKernelSize = 85
+# preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
 # dataDir = 'data_export'
 # imageDir = 'raw_images'
 # imageBaseName = 'Spec010'
+# dicKernelSize = 55
 
-# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
-# metadataFilename = 'PTFE-Epoxy.csv'
-# dataDir = 'data_export'
-# # dataDir = 'data_export_fine'
-# imageDir = 'raw_images'
-# imageBaseName = 'Spec048'
+basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
+metadataFilename = 'PTFE-Epoxy.csv'
+dataDir = 'data_export'
+# dataDir = 'data_export_fine'
+imageDir = 'raw_images'
+imageBaseName = 'Spec048'
+dicKernelSize = 81
 
-# PTFE-Epoxy with fine spatial and temporal resolutions, mid-experiment.
+# # PTFE-Epoxy with fine spatial and temporal resolutions, mid-experiment.
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Spec48'
 # metadataFilename = '../PTFE-Epoxy/PTFE-Epoxy.csv'
 # dataDir = 'data_grid_sparse_filtered'
 # imageDir = '../PTFE-Epoxy/raw_images'
 # imageBaseName = 'Spec048'
 # preloadedDataFilename = 'PTFE-Epoxy-fine-mid.hdf5'
+# dicKernelSize = 81
 
-dataFormat = 'tiff'
-basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/micro_epoxy-hole'
-dataDir = ''
-imageDir = ''
-imageBaseName = 'test'
-imageFilenameFormat = '{}_{:03d}.bmp'
-metadataFilename = ''
-preloadedDataFilename = 'micro_epoxy-hole'
+# dataFormat = 'tiff'
+# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/micro_epoxy-hole'
+# dataDir = ''
+# imageDir = ''
+# imageBaseName = 'test'
+# imageFilenameFormat = '{}_{:03d}.bmp'
+# metadataFilename = ''
+# preloadedDataFilename = 'micro_epoxy-hole'
 
 maxFrames = 99999
 reloadOriginalData = False
@@ -359,6 +373,33 @@ def color_map_hsv(X, Y, maxNorm):
     return result
 
 
+def morphology_prune(data, iter):
+    # Reference: http://homepages.inf.ed.ac.uk/rbf/HIPR2/thin.htm
+
+    # The structuring element for pruning.
+    # Here '2' means empty cell (match anything).
+    selems = [
+        np.array([[0, 0, 0],
+                  [0, 1, 0],
+                  [0, 2, 2],])
+    ]
+
+    # Another basic selem is a mirrored version of the first one.
+    selems.append(np.flip(selems[0], axis=0))
+    # Append all rotations of the basic two selems.
+    for i in range(0, 3):
+        selems.append(np.rot90(selems[2 * i]))
+        selems.append(np.rot90(selems[2 * i + 1]))
+
+    output = data.copy()
+    for i in range(0, iter):
+        for selem in selems:
+            removedPixels = scipy.ndimage.morphology.binary_hit_or_miss(output, selem == 1, selem == 0)
+            output = np.logical_xor(output, removedPixels)
+
+    return output
+
+
 def train_net(XTrain, yTrain, XVal, yVal, patchSize):
     timeStart = time.time()
     model = keras.models.Sequential()
@@ -597,9 +638,15 @@ def append_matched_pixels(dataset):
         matchedPixels = np.zeros(frameSize)
         backwardFlow = np.zeros(frameSize + (2,))
         print("Frame {}/{}".format(f, frameNumber))
-        frameFlow = h5Data[f, :, :, :][:, :, [header.index('u'), header.index('v')]]
+        frameData = h5Data[f, :, :, :]
+        frameFlow = frameData[:, :, [header.index('u'), header.index('v')]]
+        frameMask = frameData[:, :, header.index('sigma')]
         for x in range(0, frameSize[0]):
             for y in range(0, frameSize[1]):
+                # Don't consider pixels that lost tracking.
+                if frameMask[x, y] < 0:
+                    continue
+
                 newX = x + int(round((frameFlow[x, y, 0] - imageShift[f, 0]) / step[0]))
                 newY = y + int(round((frameFlow[x, y, 1] - imageShift[f, 1]) / step[1]))
                 if (0 < newX < frameSize[0]) and (0 < newY < frameSize[1]):
@@ -770,6 +817,8 @@ def plot_data(dataset):
     #
     # return
 
+    min, max, mappingStep = compute_data_image_mapping(dataset)
+
     fig = plt.figure()
     axes = []
     for f in range(0, 15):
@@ -833,7 +882,6 @@ def plot_data(dataset):
         # axes[6].imshow(matchedPixelsClosing.transpose(), origin='lower', cmap='gray')
 
         # print("Matched pixels, downsample and threshold")
-        threshold = lambda t: lambda x: x if x >= t else 0.0
         thresholdBinary = lambda t: lambda x: 1.0 if x >= t else 0.0
         matchedPixelsGaussThres = np.vectorize(thresholdBinary(0.5))(matchedPixelsGauss)
 
@@ -869,9 +917,15 @@ def plot_data(dataset):
             tempResult = skimage.morphology.binary_dilation(tempResult, selem)
             tempResult = skimage.morphology.binary_dilation(tempResult, selem)
             tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
-            # Don't erode back: an extra round of dilation compensates for the kernel used during DIC.
-            tempResult = skimage.morphology.binary_dilation(tempResult, selem)
-            tempResult = skimage.morphology.binary_dilation(tempResult, selem)
+
+            # Don't erode back: instead, compensate for the kernel used during DIC.
+            requiredDilation = int((dicKernelSize - 1) / 2 / mappingStep[0])
+            currentDilation = 2  # Because we dilated twice without eroding back.
+            for i in range(currentDilation, requiredDilation + 1):
+                tempResult = skimage.morphology.binary_dilation(tempResult, selem)
+
+            print("Applied {} extra dilation rounds to compensate for the DIC kernel."
+                  .format(requiredDilation - currentDilation))
 
             matchedPixelsGaussThresClean = tempResult
 
@@ -892,7 +946,7 @@ def plot_data(dataset):
         vBackFilledIn = masked_gaussian_filter(vBack, sourceMask, targetMask, 50.0 / 3.0)
 
         axes[10].imshow(color_map_hsv(uBackFilledIn, vBackFilledIn, maxNorm=50.0).swapaxes(0, 1), origin='lower')
-        axes[11].imshow((uBackFilledIn ** 2 + vBackFilledIn ** 2).swapaxes(0, 1), origin='lower')
+        # axes[11].imshow((uBackFilledIn ** 2 + vBackFilledIn ** 2).swapaxes(0, 1), origin='lower')
 
         frameSize = frameData.shape[0:2]
         matchedPixelsRef = np.zeros(frameSize)
@@ -906,17 +960,40 @@ def plot_data(dataset):
                 if newX >= 0 and newX < frameSize[0] and newY >= 0 and newY < frameSize[1]:
                     matchedPixelsRef[newX, newY] = 1.0
 
-        axes[12].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
+        axes[11].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
 
-        # Construct a sigma plot with compensation for the DIC kernel.
-        binarySigma = frameData[..., header.index('sigma')] >= 0
-        binarySigmaCompensated = binarySigma.copy()
-        binarySigmaCompensated = skimage.morphology.binary_dilation(binarySigmaCompensated, selem)
-        binarySigmaCompensated = skimage.morphology.binary_dilation(binarySigmaCompensated, selem)
-        binarySigmaCompensated = skimage.morphology.binary_dilation(binarySigmaCompensated, selem)
-        binarySigmaCompensated = skimage.morphology.binary_dilation(binarySigmaCompensated, selem)
+        ### Extract 1-pixel crack paths from the sigma plot through skeletonization (thinning).
 
-        axes[13].imshow(binarySigmaCompensated.transpose(), origin='lower', cmap='gray')
+        # Get the original sigma plot, with untrackable pixels as 'ones' (cracks).
+        binarySigma = frameData[..., header.index('sigma')] < 0
+
+        frameSize = frameData.shape[0:2]
+        binarySigmaFiltered = binarySigma.copy()
+        maxObjectSize = int(frameWidth * frameHeight / 1000)
+
+        dicRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+
+        # Erode the cracks to remove smaller noise.
+        selem = scipy.ndimage.morphology.generate_binary_structure(binarySigma.ndim, 2)
+        for i in range(0, math.ceil(dicRadius / 2)):
+            binarySigmaFiltered = skimage.morphology.binary_erosion(binarySigmaFiltered, selem)
+
+        # Remove tiny disconnected chunks of cracks as unnecessary noise.
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            binarySigmaFiltered = skimage.morphology.remove_small_objects(binarySigmaFiltered, maxObjectSize)
+
+        axes[12].imshow(binarySigmaFiltered.transpose(), origin='lower', cmap='gray')
+
+        # Compute the skeleton.
+        binarySigmaSkeleton = skimage.morphology.skeletonize(binarySigmaFiltered)
+
+        axes[13].imshow(binarySigmaSkeleton.transpose(), origin='lower', cmap='gray')
+
+        # Prune the skeleton from small branches.
+        binarySigmaSkeletonPruned = morphology_prune(binarySigmaSkeleton, int(frameSize[0] / 100))
+
+        axes[14].imshow(binarySigmaSkeletonPruned.transpose(), origin='lower', cmap='gray')
 
         pdf.savefig(fig, bbox_inches='tight', dpi=300)
         for a in axes:
@@ -952,7 +1029,7 @@ def main():
     # timeStart = time.time()
     # print("Making a prediction.")
     # predict(dataset)
-    # print("Prediction finihsed in {:.3f} s.".format(time.time() - timeStart))
+    # print("Prediction finished in {:.3f} s.".format(time.time() - timeStart))
 
     # https://github.com/tensorflow/tensorflow/issues/3388
     # keras.backend.clear_session()
