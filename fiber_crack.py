@@ -400,6 +400,12 @@ def morphology_prune(data, iter):
     return output
 
 
+def image_variance_filter(data, windowSize):
+    mean = scipy.ndimage.uniform_filter(data, windowSize)
+    meanOfSquare = scipy.ndimage.uniform_filter(data ** 2, windowSize)
+    return meanOfSquare - mean ** 2
+
+
 def train_net(XTrain, yTrain, XVal, yVal, patchSize):
     timeStart = time.time()
     model = keras.models.Sequential()
@@ -821,14 +827,17 @@ def plot_data(dataset):
 
     fig = plt.figure()
     axes = []
-    for f in range(0, 15):
-        axes.append(fig.add_subplot(3, 5, f + 1))
+    for f in range(0, 20):
+        axes.append(fig.add_subplot(4, 5, f + 1))
         axes[f].axis('off')
 
     fig.subplots_adjust(hspace=0.025, wspace=0.025)
 
+    frameNumber = h5Data.shape[0]
+    crackAreaData = np.zeros(frameNumber)
+
     # Draw the frame plots.
-    for f in range(0, h5Data.shape[0]):
+    for f in range(0, frameNumber):
         timeStart = time.time()
         frameIndex = frameMap[f]
         print("Frame {}".format(frameIndex))
@@ -869,13 +878,14 @@ def plot_data(dataset):
         # axes[4].imshow(imageData3, origin='lower', cmap='gray')
 
         # print("Camera image")
-        axes[3].imshow(frameData[:, :, header.index('camera')].transpose(), origin='lower', cmap='gray')
+        cameraImage = frameData[:, :, header.index('camera')]
+        axes[3].imshow(cameraImage.transpose(), origin='lower', cmap='gray')
 
-        axes[4].imshow(matchedPixels.transpose(), origin='lower', cmap='gray')
+        axes[5].imshow(matchedPixels.transpose(), origin='lower', cmap='gray')
 
         # print("Matched pixels, mean convolution.")
         matchedPixelsGauss = skimage.filters.gaussian(matchedPixels, 5.0 / 3.0)
-        axes[5].imshow(matchedPixelsGauss.transpose(), origin='lower', cmap='gray')
+        axes[6].imshow(matchedPixelsGauss.transpose(), origin='lower', cmap='gray')
 
         # print("Matched pixels, closing.")
         # matchedPixelsClosing = scipy.ndimage.morphology.grey_closing(matchedPixels, (3, 3))
@@ -885,7 +895,7 @@ def plot_data(dataset):
         thresholdBinary = lambda t: lambda x: 1.0 if x >= t else 0.0
         matchedPixelsGaussThres = np.vectorize(thresholdBinary(0.5))(matchedPixelsGauss)
 
-        axes[6].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
+        axes[7].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
 
         # print("Matched pixels, close, downsample, threshold, erode")
         # matchedPixelsDown = skimage.measure.block_reduce(matchedPixelsClosing, (3, 3), np.mean)
@@ -919,48 +929,75 @@ def plot_data(dataset):
             tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
 
             # Don't erode back: instead, compensate for the kernel used during DIC.
-            requiredDilation = int((dicKernelSize - 1) / 2 / mappingStep[0])
+            dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
             currentDilation = 2  # Because we dilated twice without eroding back.
-            for i in range(currentDilation, requiredDilation + 1):
+            for i in range(currentDilation, dicKernelRadius + 1):
                 tempResult = skimage.morphology.binary_dilation(tempResult, selem)
 
             print("Applied {} extra dilation rounds to compensate for the DIC kernel."
-                  .format(requiredDilation - currentDilation))
+                  .format(dicKernelRadius - currentDilation))
 
             matchedPixelsGaussThresClean = tempResult
 
-        axes[7].imshow(matchedPixelsGaussThresClean.transpose().astype(np.float), origin='lower', cmap='gray')
-        axes[8].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
-        contours = skimage.measure.find_contours(matchedPixelsGaussThresClean.transpose(), 0.8)
+        axes[8].imshow(matchedPixelsGaussThresClean.transpose().astype(np.float), origin='lower', cmap='gray')
+        axes[9].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
+        contours = skimage.measure.find_contours(matchedPixelsGaussThresClean.transpose(), 0.5)
         for n, contour in enumerate(contours):
-            axes[8].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+            axes[9].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
-        uBack = frameData[..., header.index('u_back')]
-        vBack = frameData[..., header.index('v_back')]
-        axes[9].imshow(color_map_hsv(uBack, vBack, maxNorm=50.0).swapaxes(0, 1), origin='lower')
+        # uBack = frameData[..., header.index('u_back')]
+        # vBack = frameData[..., header.index('v_back')]
+        # axes[9].imshow(color_map_hsv(uBack, vBack, maxNorm=50.0).swapaxes(0, 1), origin='lower')
+        #
+        # sourceMask = matchedPixels > 0.0
+        # targetMask = matchedPixels == 0.0
+        #
+        # uBackFilledIn = masked_gaussian_filter(uBack, sourceMask, targetMask, 50.0 / 3.0)
+        # vBackFilledIn = masked_gaussian_filter(vBack, sourceMask, targetMask, 50.0 / 3.0)
+        #
+        # axes[10].imshow(color_map_hsv(uBackFilledIn, vBackFilledIn, maxNorm=50.0).swapaxes(0, 1), origin='lower')
+        # # axes[11].imshow((uBackFilledIn ** 2 + vBackFilledIn ** 2).swapaxes(0, 1), origin='lower')
+        #
+        # frameSize = frameData.shape[0:2]
+        # matchedPixelsRef = np.zeros(frameSize)
+        # for x in range(0, frameSize[0]):
+        #     for y in range(0, frameSize[1]):
+        #         if matchedPixelsGaussThresClean[x, y] == 1.0:
+        #             continue
+        #
+        #         newX = int(round(x + uBackFilledIn[x, y]))
+        #         newY = int(round(y + vBackFilledIn[x, y]))
+        #         if newX >= 0 and newX < frameSize[0] and newY >= 0 and newY < frameSize[1]:
+        #             matchedPixelsRef[newX, newY] = 1.0
+        #
+        # axes[11].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
 
-        sourceMask = matchedPixels > 0.0
-        targetMask = matchedPixels == 0.0
+        ###  Variance-based camera image crack extraction.
+        varFilterSize = dicKernelRadius / 2 * 2 + 1
+        cameraImageVar = image_variance_filter(cameraImage, (varFilterSize, varFilterSize))
 
-        uBackFilledIn = masked_gaussian_filter(uBack, sourceMask, targetMask, 50.0 / 3.0)
-        vBackFilledIn = masked_gaussian_filter(vBack, sourceMask, targetMask, 50.0 / 3.0)
+        # print("Variance: from {} to {}".format(np.min(cameraImageVar), np.max(cameraImageVar)))
+        axes[10].imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
 
-        axes[10].imshow(color_map_hsv(uBackFilledIn, vBackFilledIn, maxNorm=50.0).swapaxes(0, 1), origin='lower')
-        # axes[11].imshow((uBackFilledIn ** 2 + vBackFilledIn ** 2).swapaxes(0, 1), origin='lower')
+        binaryVariance = cameraImageVar < 0.003
+        # varianceObjectSize = int(frameWidth * frameHeight / 4000)
 
-        frameSize = frameData.shape[0:2]
-        matchedPixelsRef = np.zeros(frameSize)
-        for x in range(0, frameSize[0]):
-            for y in range(0, frameSize[1]):
-                if matchedPixelsGaussThresClean[x, y] == 1.0:
-                    continue
+        binaryVarianceFiltered = binaryVariance.copy()
+        for i in range(0, math.ceil(dicKernelRadius / 2)):
+            binaryVarianceFiltered = skimage.morphology.binary_dilation(binaryVarianceFiltered, selem)
+        # with warnings.catch_warnings():
+        #     warnings.filterwarnings('ignore')
+        #     binaryVarianceFiltered = skimage.morphology.remove_small_objects(binaryVariance, varianceObjectSize)
 
-                newX = int(round(x + uBackFilledIn[x, y]))
-                newY = int(round(y + vBackFilledIn[x, y]))
-                if newX >= 0 and newX < frameSize[0] and newY >= 0 and newY < frameSize[1]:
-                    matchedPixelsRef[newX, newY] = 1.0
+        axes[11].imshow(binaryVarianceFiltered.transpose(), origin='lower', cmap='gray')
 
-        axes[11].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
+        totalArea = np.count_nonzero(binaryVarianceFiltered)
+        crackAreaData[f] = totalArea
+
+        axes[12].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
+        varianceContours = skimage.measure.find_contours(binaryVarianceFiltered.transpose(), 0.5)
+        for n, contour in enumerate(varianceContours):
+            axes[12].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
         ### Extract 1-pixel crack paths from the sigma plot through skeletonization (thinning).
 
@@ -983,17 +1020,17 @@ def plot_data(dataset):
             warnings.filterwarnings('ignore')
             binarySigmaFiltered = skimage.morphology.remove_small_objects(binarySigmaFiltered, maxObjectSize)
 
-        axes[12].imshow(binarySigmaFiltered.transpose(), origin='lower', cmap='gray')
+        axes[15].imshow(binarySigmaFiltered.transpose(), origin='lower', cmap='gray')
 
         # Compute the skeleton.
         binarySigmaSkeleton = skimage.morphology.skeletonize(binarySigmaFiltered)
 
-        axes[13].imshow(binarySigmaSkeleton.transpose(), origin='lower', cmap='gray')
+        axes[16].imshow(binarySigmaSkeleton.transpose(), origin='lower', cmap='gray')
 
         # Prune the skeleton from small branches.
         binarySigmaSkeletonPruned = morphology_prune(binarySigmaSkeleton, int(frameSize[0] / 100))
 
-        axes[14].imshow(binarySigmaSkeletonPruned.transpose(), origin='lower', cmap='gray')
+        axes[17].imshow(binarySigmaSkeletonPruned.transpose(), origin='lower', cmap='gray')
 
         pdf.savefig(fig, bbox_inches='tight', dpi=300)
         for a in axes:
@@ -1003,8 +1040,17 @@ def plot_data(dataset):
 
         print("Rendered in {:.2f} s.".format(time.time() - timeStart))
 
-    pdf.close()
+    # Crack area figure.
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    fig.suptitle("Crack area in the current frame")
+    ax.plot(crackAreaData)
+    # ax.plot(np.sqrt(crackAreaData))
+    ax.grid(True)
 
+    pdf.savefig(fig, bbox_inches='tight', dpi=300)
+
+    pdf.close()
 
 def main():
 
