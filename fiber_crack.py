@@ -16,7 +16,7 @@ import colorsys
 import pickle
 import keras
 import skimage.measure, skimage.transform, skimage.util, skimage.filters, skimage.feature, skimage.morphology
-import scipy.ndimage.morphology
+import scipy.ndimage.morphology, scipy.stats
 from keras.layers import Dense
 from keras.constraints import maxnorm
 from PIL import Image
@@ -400,10 +400,26 @@ def morphology_prune(data, iter):
     return output
 
 
-def image_variance_filter(data, windowSize):
-    mean = scipy.ndimage.uniform_filter(data, windowSize)
-    meanOfSquare = scipy.ndimage.uniform_filter(data ** 2, windowSize)
+def image_variance_filter(data, windowRadius):
+    windowLength = windowRadius * 2 + 1
+    windowShape = (windowLength, windowLength)
+
+    mean = scipy.ndimage.uniform_filter(data, windowShape)
+    meanOfSquare = scipy.ndimage.uniform_filter(data ** 2, windowShape)
     return meanOfSquare - mean ** 2
+
+
+def image_entropy_filter(data, windowRadius):
+    dataUint = (data * 16).astype(np.uint8)
+    windowLength = windowRadius * 2 + 1
+    windowMask = np.ones((windowLength, windowLength), dtype=np.bool)
+    # windowMask = skimage.morphology.disk(windowRadius)
+
+    # Important: data range and the number of histogram bins must be equal (skimage expects it so).
+    histograms = skimage.filters.rank.windowed_histogram(dataUint, selem=windowMask, n_bins=16)
+    # return np.sum(histograms, axis=2)
+    # histograms = histograms.astype(np.float)
+    return np.apply_along_axis(scipy.stats.entropy, axis=2, arr=histograms)
 
 
 def train_net(XTrain, yTrain, XVal, yVal, patchSize):
@@ -798,6 +814,7 @@ def augment_data(dataset):
 
     return dataset
 
+
 def plot_data(dataset):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
 
@@ -834,7 +851,7 @@ def plot_data(dataset):
     fig.subplots_adjust(hspace=0.025, wspace=0.025)
 
     frameNumber = h5Data.shape[0]
-    crackAreaData = np.zeros(frameNumber)
+    crackAreaData = np.zeros((frameNumber, 2))
 
     # Draw the frame plots.
     for f in range(0, frameNumber):
@@ -973,31 +990,72 @@ def plot_data(dataset):
         # axes[11].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
 
         ###  Variance-based camera image crack extraction.
-        varFilterSize = dicKernelRadius / 2 * 2 + 1
-        cameraImageVar = image_variance_filter(cameraImage, (varFilterSize, varFilterSize))
+        varFilterRadius = int(dicKernelRadius / 2)
+        cameraImageVar = image_variance_filter(cameraImage, varFilterRadius)
 
         # print("Variance: from {} to {}".format(np.min(cameraImageVar), np.max(cameraImageVar)))
         axes[10].imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
 
-        binaryVariance = cameraImageVar < 0.003
+        varianceBinary = cameraImageVar < 0.003
         # varianceObjectSize = int(frameWidth * frameHeight / 4000)
 
-        binaryVarianceFiltered = binaryVariance.copy()
+        varianceFiltered = varianceBinary.copy()
         for i in range(0, math.ceil(dicKernelRadius / 2)):
-            binaryVarianceFiltered = skimage.morphology.binary_dilation(binaryVarianceFiltered, selem)
+            varianceFiltered = skimage.morphology.binary_dilation(varianceFiltered, selem)
         # with warnings.catch_warnings():
         #     warnings.filterwarnings('ignore')
-        #     binaryVarianceFiltered = skimage.morphology.remove_small_objects(binaryVariance, varianceObjectSize)
+        #     varianceFiltered = skimage.morphology.remove_small_objects(varianceBinary, varianceObjectSize)
 
-        axes[11].imshow(binaryVarianceFiltered.transpose(), origin='lower', cmap='gray')
+        # axes[11].imshow(varianceFiltered.transpose(), origin='lower', cmap='gray')
 
-        totalArea = np.count_nonzero(binaryVarianceFiltered)
-        crackAreaData[f] = totalArea
+        totalArea = np.count_nonzero(varianceFiltered)
+        crackAreaData[f, 0] = totalArea
 
-        axes[12].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
-        varianceContours = skimage.measure.find_contours(binaryVarianceFiltered.transpose(), 0.5)
+        axes[11].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
+        varianceContours = skimage.measure.find_contours(varianceFiltered.transpose(), 0.5)
         for n, contour in enumerate(varianceContours):
-            axes[12].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+            axes[11].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+
+        ### Entropy-based camera image crack extraction.
+        entropyFilterRadius = int(dicKernelRadius / 2)
+        cameraImageEntropy = image_entropy_filter(cameraImage, entropyFilterRadius)
+
+        axes[12].imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
+
+        print("Entropy: from {} to {}".format(np.min(cameraImageEntropy), np.max(cameraImageEntropy)))
+
+        entropyBinary = cameraImageEntropy < 1.0
+
+        entropyFiltered = entropyBinary.copy()
+        for i in range(0, math.ceil(dicKernelRadius / 2)):
+            entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
+
+        axes[13].imshow(entropyFiltered.transpose(), origin='lower', cmap='gray')
+
+        totalArea = np.count_nonzero(entropyFiltered)
+        crackAreaData[f, 1] = totalArea
+
+        axes[14].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
+        entropyContours = skimage.measure.find_contours(entropyFiltered.transpose(), 0.5)
+        for n, contour in enumerate(entropyContours):
+            axes[14].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+
+
+        ### todo A quick hack for datasets where not all images are present:
+        if np.count_nonzero(cameraImage) <= 0:
+            crackAreaData[f, :] = 0
+
+        ### Plot variance and entropy histograms for the image.
+        varianceHist = np.histogram(cameraImageVar, bins=16, range=(0, np.max(cameraImageVar)))[0]
+        entropyHist = np.histogram(cameraImageEntropy, bins=16, range=(0, np.max(cameraImageEntropy)))[0]
+
+        axes[18].bar(np.linspace(0, np.max(cameraImageVar), 16), varianceHist)
+        axes[19].bar(np.linspace(0, np.max(cameraImageEntropy), 16), entropyHist)
+
+        axes[18].axis('on')
+        axes[19].axis('on')
+        axes[18].get_yaxis().set_visible(False)
+        axes[19].get_yaxis().set_visible(False)
 
         ### Extract 1-pixel crack paths from the sigma plot through skeletonization (thinning).
 
@@ -1044,13 +1102,17 @@ def plot_data(dataset):
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
     fig.suptitle("Crack area in the current frame")
-    ax.plot(crackAreaData)
+    ax.plot(crackAreaData[:, 0], label='Variance estimation')
+    ax.plot(crackAreaData[:, 1], label='Entropy  estimation')
     # ax.plot(np.sqrt(crackAreaData))
     ax.grid(True)
+    plt.ylabel('Pixels')
+    plt.legend()
 
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
 
     pdf.close()
+
 
 def main():
 
