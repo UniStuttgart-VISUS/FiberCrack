@@ -112,13 +112,34 @@ class Dataset:
         return self.h5Data, header, frameMap, metadata, metaheader
 
     def append_column(self, newColumnName):
-        # Make sure we still have preallcoated space available.
+        """
+        Appends a new empty column to the data.
+
+        Note: we do not insert the data directly, because typically we don't want to
+        copy it into a single huge array. The size would be to big.
+        :param newColumnName:
+        :return:
+        """
+
+        # Make sure we still have preallocated space available.
         assert(self.h5Data.shape[-1] > self.h5Header.shape[0])
 
         self.h5Header.resize((self.h5Header.shape[0] + 1,))
         self.h5Header[-1] = newColumnName.encode('ascii')
 
         newColumnIndex = self.h5Header.shape[0] - 1
+        return newColumnIndex
+
+    def append_metadata_column(self, newColumnName, newColumnData):
+
+        assert(newColumnData.shape[0] == self.h5Metadata.shape[0])
+
+        self.h5Metadata.resize(self.h5Metadata.shape[1] + 1, axis=1)
+        self.h5Metaheader.resize(self.h5Metaheader.shape[0] + 1, axis=0)
+        self.h5Metadata[:, -1] = newColumnData
+        self.h5Metaheader[-1] = newColumnName
+
+        newColumnIndex = self.h5Metaheader.shape[0] - 1
         return newColumnIndex
 
     def get_image_shift(self):
@@ -624,6 +645,8 @@ def append_camera_image(dataset):
 
     min, max, step = compute_data_image_mapping(dataset)
 
+    hasCameraImageMask = np.zeros((h5Data.shape[0]))
+
     columnIndex = dataset.append_column('camera')
     frameNumber = h5Data.shape[0]
     for f in range(0, frameNumber):
@@ -643,6 +666,9 @@ def append_camera_image(dataset):
                 cameraImage[relMin[1]:relMax[1]:step[1], relMin[0]:relMax[0]:step[0]].transpose()
 
             dataset.h5Data.attrs['cameraImageSize'] = cameraImage.shape
+            hasCameraImageMask[f] = True
+
+    dataset.append_metadata_column(b'hasCameraImage', hasCameraImageMask)
 
     return dataset
 
@@ -797,14 +823,11 @@ def augment_data(dataset):
     assert('camera' not in header)
     assert('matched' not in header)
 
+    # Add the image shift to the metadata.
     imageShift = compute_avg_flow(dataset)
 
-    # Add two columns to the metadata.
-    dataset.h5Metadata.resize((dataset.h5Metadata.shape[0], dataset.h5Metadata.shape[1] + 2))
-    dataset.h5Metaheader.resize((dataset.h5Metaheader.shape[0] + 2,))
-
-    dataset.h5Metadata[:, [-2, -1]] = imageShift
-    dataset.h5Metaheader[[-2, -1]] = [b'imageShiftX', b'imageShiftY']
+    dataset.append_metadata_column(b'imageShiftX', imageShift[..., 0])
+    dataset.append_metadata_column(b'imageShiftY', imageShift[..., 1])
 
     print("Adding the camera image...")
     append_camera_image(dataset)
@@ -1010,8 +1033,10 @@ def plot_data(dataset):
 
         # axes[11].imshow(varianceFiltered.transpose(), origin='lower', cmap='gray')
 
-        totalArea = np.count_nonzero(varianceFiltered)
-        crackAreaData[f, 0] = totalArea
+        # Determine the crack area.
+        if dataset.h5Metadata[f, dataset.get_metaheader().index('hasCameraImage')]:
+            totalArea = np.count_nonzero(varianceFiltered)
+            crackAreaData[f, 0] = totalArea
 
         axes[11].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
         varianceContours = skimage.measure.find_contours(varianceFiltered.transpose(), 0.5)
@@ -1034,18 +1059,16 @@ def plot_data(dataset):
 
         axes[13].imshow(entropyFiltered.transpose(), origin='lower', cmap='gray')
 
-        totalArea = np.count_nonzero(entropyFiltered)
-        crackAreaData[f, 1] = totalArea
+        # Determine the crack area.
+        if dataset.h5Metadata[f, dataset.get_metaheader().index('hasCameraImage')]:
+            totalArea = np.count_nonzero(entropyFiltered)
+            crackAreaData[f, 1] = totalArea
 
         axes[14].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
         entropyContours = skimage.measure.find_contours(entropyFiltered.transpose(), 0.5)
         for n, contour in enumerate(entropyContours):
             axes[14].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
-
-        ### todo A quick hack for datasets where not all images are present:
-        if np.count_nonzero(cameraImage) <= 0:
-            crackAreaData[f, :] = 0
 
         ### Plot variance and entropy histograms for the image.
         varianceHist = np.histogram(cameraImageVar, bins=16, range=(0, np.max(cameraImageVar)))[0]
