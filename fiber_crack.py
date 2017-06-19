@@ -642,6 +642,8 @@ def append_camera_image(dataset):
             h5Data[f, 0:size[0], 0:size[1], columnIndex] = \
                 cameraImage[relMin[1]:relMax[1]:step[1], relMin[0]:relMax[0]:step[0]].transpose()
 
+            dataset.h5Data.attrs['cameraImageSize'] = cameraImage.shape
+
     return dataset
 
 
@@ -840,7 +842,7 @@ def plot_data(dataset):
     #
     # return
 
-    min, max, mappingStep = compute_data_image_mapping(dataset)
+    mappingMin, mappingMax, mappingStep = compute_data_image_mapping(dataset)
 
     fig = plt.figure()
     axes = []
@@ -1108,6 +1110,17 @@ def plot_data(dataset):
     ax.grid(True)
     plt.ylabel('Pixels')
     plt.legend()
+
+    pdf.savefig(fig, bbox_inches='tight', dpi=300)
+
+    # Print the data-to-camera mapping.
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    mappingText = 'Data to camera image mapping \n'
+    mappingText += 'Data size: {} Image size: {} \n'.format(h5Data.shape[1:3], dataset.h5Data.attrs['cameraImageSize'])
+    mappingText += 'Min: {} Max: {} Step: {} \n'.format(mappingMin, mappingMax, mappingStep)
+
+    ax.text(0.1, 0.1, mappingText)
 
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
 
