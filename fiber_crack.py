@@ -143,7 +143,7 @@ class Dataset:
         return newColumnIndex
 
     def get_data_image_mapping(self):
-        return (self.h5Data.attrs['mappingMin'], self.h5Data.attrs['mappingMax'], self.h5Data.attrs['mappingStep'])
+        return (self.get_attr('mappingMin'), self.get_attr('mappingMax'), self.get_attr('mappingStep'))
 
     def get_image_shift(self):
         metaheader = self.get_metaheader()
@@ -158,6 +158,15 @@ class Dataset:
 
     def get_metadata_val(self, frame, columnName):
         return self.h5Metadata[frame, self.get_metaheader().index(columnName)]
+
+    def get_metadata_column(self, columnName):
+        return self.h5Metadata[:, self.get_metaheader().index(columnName)]
+
+    def set_attr(self, attrName, attrValue):
+        self.h5Data.attrs[attrName] = attrValue
+
+    def get_attr(self, attrName):
+        return self.h5Data.attrs[attrName]
 
     def get_header(self):
         return self.h5Header[:].astype(np.str).tolist()
@@ -674,7 +683,7 @@ def append_camera_image(dataset):
             h5Data[f, 0:size[0], 0:size[1], columnIndex] = \
                 cameraImage[relMin[1]:relMax[1]:step[1], relMin[0]:relMax[0]:step[0]].transpose()
 
-            dataset.h5Data.attrs['cameraImageSize'] = cameraImage.shape
+            dataset.set_attr('cameraImageSize', cameraImage.shape)
             hasCameraImageMask[f] = True
 
     dataset.append_metadata_column('hasCameraImage', hasCameraImageMask)
@@ -778,9 +787,22 @@ def append_data_image_mapping(dataset):
     stepX = round((maxX - minX) / h5Data.shape[1])
     stepY = round((maxY - minY) / h5Data.shape[2])
 
-    dataset.h5Data.attrs['mappingMin']  = np.array([minX, minY])
-    dataset.h5Data.attrs['mappingMax']  = np.array([maxX, maxY])
-    dataset.h5Data.attrs['mappingStep'] = np.array([stepX, stepY])
+    dataset.set_attr('mappingMin', np.array([minX, minY]))
+    dataset.set_attr('mappingMax', np.array([maxX, maxY]))
+    dataset.set_attr('mappingStep', np.array([stepX, stepY]))
+
+
+def append_physical_frame_size(dataset):
+    h5Data, header, *r = dataset.unpack_vars()
+
+    minX = h5Data[0, 0, 0, header.index('X')]
+    maxX = h5Data[0, -1, -1, header.index('X')]
+    minY = h5Data[0, 0, 0, header.index('Y')]
+    maxY = h5Data[0, -1, -1, header.index('Y')]
+
+    physicalSize = np.abs(np.array([maxX - minX, maxY - minY]))
+    print('Computed physical size: {}'.format(physicalSize))
+    dataset.set_attr('physicalFrameSize', physicalSize)
 
 
 def compute_avg_flow(dataset):
@@ -824,44 +846,16 @@ def augment_data_extra_feature_number():
     return augmentedFeatureNumber + resultsFeatureNumber
 
 
-def augment_data(dataset):
-    header = dataset.get_header()
-    metaheader = dataset.get_metaheader()
-
-    if 'imageShiftX' in metaheader and 'camera' in header and 'matched' in header:
-        print("Data already augmented, skipping.")
-        return dataset
-
-    # For now we require that all the data is present, or none of it.
-    assert('imageShiftX' not in metaheader)
-    assert('camera' not in header)
-    assert('matched' not in header)
-
-    # Add the data to image iamge mapping to the dataset.
-    append_data_image_mapping(dataset)
-
-    # Add the image shift to the metadata.
-    imageShift = compute_avg_flow(dataset)
-
-    dataset.append_metadata_column('imageShiftX', imageShift[..., 0])
-    dataset.append_metadata_column('imageShiftY', imageShift[..., 1])
-
-    print("Adding the camera image...")
-    append_camera_image(dataset)
-    print("Adding the matched pixels...")
-    append_matched_pixels(dataset)
-
-    print("Zeroing the pixels that lost tracking.")
-    zero_pixels_without_tracking(dataset)
-
-    return dataset
-
-
 def append_crack_from_unmatched_pixels(dataset):
+
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
 
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
+
+    if 'matchedPixelsGauss' in header:
+        print('Cracks from unmatched pixels are already in the data. Skipping.')
+        return
 
     # Prepare columns for the results.
     index1 = dataset.append_column('matchedPixelsGauss')
@@ -925,6 +919,10 @@ def append_crack_from_variance(dataset):
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
 
+    if 'cameraImageVar' in header:
+        print('Cracks from variance are already in the data. Skipping.')
+        return
+
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
     dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
     varFilterRadius = int(dicKernelRadius / 2)
@@ -957,12 +955,23 @@ def append_crack_from_variance(dataset):
         dataset.h5Data[frameIndex, ..., index1] = cameraImageVar
         dataset.h5Data[frameIndex, ..., index2] = varianceFiltered
 
+    frameArea = frameWidth * frameHeight
+    physicalFrameSize = dataset.get_attr('physicalFrameSize')
+    physicalFrameArea = physicalFrameSize[0] * physicalFrameSize[1]
+
     dataset.append_metadata_column('crackAreaVariance', crackAreaData)
+    dataset.append_metadata_column('crackAreaVariancePhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
 def append_crack_from_entropy(dataset):
+    # todo a lot of repetition between the variance and the entropy implementations.
+    # refactor, if more features are added.
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
+
+    if 'cameraImageEntropy' in header:
+        print('Cracks from entropy are already in the data. Skipping.')
+        return
 
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
     dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
@@ -996,13 +1005,62 @@ def append_crack_from_entropy(dataset):
         dataset.h5Data[frameIndex, ..., index1] = cameraImageEntropy
         dataset.h5Data[frameIndex, ..., index2] = entropyFiltered
 
+    frameArea = frameWidth * frameHeight
+    physicalFrameSize = dataset.get_attr('physicalFrameSize')
+    physicalFrameArea = physicalFrameSize[0] * physicalFrameSize[1]
+
     dataset.append_metadata_column('crackAreaEntropy', crackAreaData)
+    dataset.append_metadata_column('crackAreaEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
+
+
+def augment_data(dataset):
+    header = dataset.get_header()
+    metaheader = dataset.get_metaheader()
+
+    if 'imageShiftX' in metaheader and 'camera' in header and 'matched' in header:
+        print("Data already augmented, skipping.")
+        return dataset
+
+    # For now we require that all the data is present, or none of it.
+    assert('imageShiftX' not in metaheader)
+    assert('camera' not in header)
+    assert('matched' not in header)
+
+    # Add the data to image mapping to the dataset.
+    append_data_image_mapping(dataset)
+
+    # Add the physical dimensions of the data (in micrometers).
+    append_physical_frame_size(dataset)
+
+    # Add the image shift to the metadata.
+    imageShift = compute_avg_flow(dataset)
+
+    dataset.append_metadata_column('imageShiftX', imageShift[..., 0])
+    dataset.append_metadata_column('imageShiftY', imageShift[..., 1])
+
+    print("Adding the camera image...")
+    append_camera_image(dataset)
+    print("Adding the matched pixels...")
+    append_matched_pixels(dataset)
+
+    print("Zeroing the pixels that lost tracking.")
+    zero_pixels_without_tracking(dataset)
+
+    return dataset
 
 
 def compute_and_append_results(dataset):
     append_crack_from_unmatched_pixels(dataset)
+
     append_crack_from_variance(dataset)
     append_crack_from_entropy(dataset)
+
+
+def plot_contour(axes, backgroundImage, binaryImage):
+    axes.imshow(backgroundImage.transpose(), origin='lower', cmap='gray')
+    entropyContours = skimage.measure.find_contours(binaryImage.transpose(), 0.5)
+    for n, contour in enumerate(entropyContours):
+        axes.plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
 
 def plot_data(dataset):
@@ -1025,13 +1083,9 @@ def plot_data(dataset):
     pdf.savefig(fig)
     plt.cla()
 
-    # plot_optic_flow(pdf, dataset, 130)
-    # pdf.close()
-    #
-    # return
-
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
 
+    # Prepare a figure with subfigures.
     fig = plt.figure()
     axes = []
     for f in range(0, 20):
@@ -1040,17 +1094,11 @@ def plot_data(dataset):
 
     fig.subplots_adjust(hspace=0.025, wspace=0.025)
 
-    frameNumber = h5Data.shape[0]
-    crackAreaData = np.zeros((frameNumber, 2))
-
-    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
-    selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
-
     # Draw the frame plots.
-    for f in range(0, frameNumber):
+    for f in range(0, dataset.get_frame_number()):
         timeStart = time.time()
         frameIndex = frameMap[f]
-        print("Frame {}".format(frameIndex))
+        print("Plotting frame {}".format(frameIndex))
         fig.suptitle("Frame {}".format(frameIndex))
 
         frameData = h5Data[f, :, :, :]
@@ -1091,35 +1139,23 @@ def plot_data(dataset):
         matchedPixelsGaussThresClean = frameData[..., header.index('matchedPixelsGaussThresClean')]
 
         axes[8].imshow(matchedPixelsGaussThresClean.transpose().astype(np.float), origin='lower', cmap='gray')
-        axes[9].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
-        contours = skimage.measure.find_contours(matchedPixelsGaussThresClean.transpose(), 0.5)
-        for n, contour in enumerate(contours):
-            axes[9].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+        plot_contour(axes[9], cameraImageData, matchedPixelsGaussThresClean)
 
         # Variance-based camera image crack extraction.
         cameraImageVar = frameData[..., header.index('cameraImageVar')]
-        axes[10].imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
-
         varianceFiltered = frameData[..., header.index('cameraImageVarFiltered')]
 
-        axes[11].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
-        varianceContours = skimage.measure.find_contours(varianceFiltered.transpose(), 0.5)
-        for n, contour in enumerate(varianceContours):
-            axes[11].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+        axes[10].imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
+        plot_contour(axes[11], cameraImageData, varianceFiltered)
 
         # Entropy-based camera image crack extraction.
         cameraImageEntropy = frameData[..., header.index('cameraImageEntropy')]
-        axes[12].imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
-
         entropyFiltered = frameData[..., header.index('cameraImageEntropyFiltered')]
 
-        axes[13].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
-        entropyContours = skimage.measure.find_contours(entropyFiltered.transpose(), 0.5)
-        for n, contour in enumerate(entropyContours):
-            axes[13].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+        axes[12].imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
+        plot_contour(axes[13], cameraImageData, entropyFiltered)
 
-
-        ### Plot variance and entropy histograms for the image.
+        # Plot variance and entropy histograms for the image.
         varianceHist = np.histogram(cameraImageVar, bins=16, range=(0, np.max(cameraImageVar)))[0]
         entropyHist = np.histogram(cameraImageEntropy, bins=16, range=(0, np.max(cameraImageEntropy)))[0]
 
@@ -1176,11 +1212,11 @@ def plot_data(dataset):
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
     fig.suptitle("Crack area in the current frame")
-    ax.plot(crackAreaData[:, 0], label='Variance estimation')
-    ax.plot(crackAreaData[:, 1], label='Entropy  estimation')
+    ax.plot(dataset.get_metadata_column('crackAreaVariancePhysical'), label='Variance estimation')
+    ax.plot(dataset.get_metadata_column('crackAreaEntropyPhysical'), label='Entropy  estimation')
     # ax.plot(np.sqrt(crackAreaData))
     ax.grid(True)
-    plt.ylabel('Pixels')
+    plt.ylabel('Micrometer^2')
     plt.legend()
 
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
@@ -1188,9 +1224,9 @@ def plot_data(dataset):
     # Print the data-to-camera mapping.
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
-    mappingText = 'Data to camera image mapping \n'
-    mappingText += 'Data size: {} Image size: {} \n'.format(h5Data.shape[1:3], dataset.h5Data.attrs['cameraImageSize'])
-    mappingText += 'Min: {} Max: {} Step: {} \n'.format(mappingMin, mappingMax, mappingStep)
+    mappingText = 'Data to camera image mapping\n'
+    mappingText += 'Data size: {} Image size: {}\n'.format(list(h5Data.shape[1:3]), dataset.get_attr('cameraImageSize'))
+    mappingText += 'Min: {} Max: {} Step: {}\n'.format(mappingMin, mappingMax, mappingStep)
 
     ax.text(0.1, 0.1, mappingText)
 
