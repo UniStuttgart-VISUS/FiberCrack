@@ -137,18 +137,27 @@ class Dataset:
         self.h5Metadata.resize(self.h5Metadata.shape[1] + 1, axis=1)
         self.h5Metaheader.resize(self.h5Metaheader.shape[0] + 1, axis=0)
         self.h5Metadata[:, -1] = newColumnData
-        self.h5Metaheader[-1] = newColumnName
+        self.h5Metaheader[-1] = newColumnName.encode('ascii')
 
         newColumnIndex = self.h5Metaheader.shape[0] - 1
         return newColumnIndex
+
+    def get_data_image_mapping(self):
+        return (self.h5Data.attrs['mappingMin'], self.h5Data.attrs['mappingMax'], self.h5Data.attrs['mappingStep'])
 
     def get_image_shift(self):
         metaheader = self.get_metaheader()
         indices = [metaheader.index('imageShiftX'), metaheader.index('imageShiftY')]
         return self.h5Metadata[:, indices].astype(np.int)
 
+    def get_frame_number(self):
+        return self.h5Data.shape[0]
+
     def get_frame_size(self):
         return tuple(self.h5Data.shape[1:3])
+
+    def get_metadata_val(self, frame, columnName):
+        return self.h5Metadata[frame, self.get_metaheader().index(columnName)]
 
     def get_header(self):
         return self.h5Header[:].astype(np.str).tolist()
@@ -236,8 +245,8 @@ def load_csv_data():
 
         # Metadata and the headers are resizable, since we will augment the data later.
         h5File.create_dataset('metadata', data=metadata, maxshape=(metadata.shape[0], None))
-        h5File.create_dataset('metaheader', data=np.array(metaheader, dtype='|S20'), maxshape=(None,))
-        h5File.create_dataset('header', data=np.array(header, dtype='|S20'), maxshape=(None,))
+        h5File.create_dataset('metaheader', data=np.array(metaheader, dtype='|S128'), maxshape=(None,))
+        h5File.create_dataset('header', data=np.array(header, dtype='|S128'), maxshape=(None,))
         h5File.create_dataset('frameMap', data=frameMap)
 
     else:
@@ -643,7 +652,7 @@ def append_camera_image(dataset):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
     imageShift = dataset.get_image_shift()
 
-    min, max, step = compute_data_image_mapping(dataset)
+    min, max, step = dataset.get_data_image_mapping()
 
     hasCameraImageMask = np.zeros((h5Data.shape[0]))
 
@@ -668,7 +677,7 @@ def append_camera_image(dataset):
             dataset.h5Data.attrs['cameraImageSize'] = cameraImage.shape
             hasCameraImageMask[f] = True
 
-    dataset.append_metadata_column(b'hasCameraImage', hasCameraImageMask)
+    dataset.append_metadata_column('hasCameraImage', hasCameraImageMask)
 
     return dataset
 
@@ -677,7 +686,7 @@ def append_matched_pixels(dataset):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
     imageShift = dataset.get_image_shift()
     frameSize = dataset.get_frame_size()
-    min, max, step = compute_data_image_mapping(dataset)
+    min, max, step = dataset.get_data_image_mapping()
 
     matchedColumnIndex = dataset.append_column('matched')
     uBackColumnIndex = dataset.append_column('u_back')
@@ -724,7 +733,7 @@ def plot_optic_flow(pdf, dataset, frameIndex):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
     imageShift = dataset.get_image_shift()
     frameSize = dataset.get_frame_size()
-    min, max, step = compute_data_image_mapping(dataset)
+    min, max, step = dataset.get_data_image_mapping()
 
     imageShift = imageShift[frameIndex]
 
@@ -752,7 +761,7 @@ def plot_optic_flow(pdf, dataset, frameIndex):
     plt.show()
 
 
-def compute_data_image_mapping(dataset):
+def append_data_image_mapping(dataset):
     """
     Fetch the min/max pixel coordinates of the data, in original image space (2k*2k image)
     Important, since the data only covers every ~fifth pixel of some cropped subimage of the camera image.
@@ -769,7 +778,9 @@ def compute_data_image_mapping(dataset):
     stepX = round((maxX - minX) / h5Data.shape[1])
     stepY = round((maxY - minY) / h5Data.shape[2])
 
-    return np.array([minX, minY]), np.array([maxX, maxY]), np.array([stepX, stepY])
+    dataset.h5Data.attrs['mappingMin']  = np.array([minX, minY])
+    dataset.h5Data.attrs['mappingMax']  = np.array([maxX, maxY])
+    dataset.h5Data.attrs['mappingStep'] = np.array([stepX, stepY])
 
 
 def compute_avg_flow(dataset):
@@ -807,7 +818,10 @@ def augment_data_extra_feature_number():
     # When allocating a continuous hdf5 file we need to know the final size
     # of the data in advance.
 
-    return 4
+    augmentedFeatureNumber = 4
+    resultsFeatureNumber = 10  # Approximately, leave some empty.
+
+    return augmentedFeatureNumber + resultsFeatureNumber
 
 
 def augment_data(dataset):
@@ -823,11 +837,14 @@ def augment_data(dataset):
     assert('camera' not in header)
     assert('matched' not in header)
 
+    # Add the data to image iamge mapping to the dataset.
+    append_data_image_mapping(dataset)
+
     # Add the image shift to the metadata.
     imageShift = compute_avg_flow(dataset)
 
-    dataset.append_metadata_column(b'imageShiftX', imageShift[..., 0])
-    dataset.append_metadata_column(b'imageShiftY', imageShift[..., 1])
+    dataset.append_metadata_column('imageShiftX', imageShift[..., 0])
+    dataset.append_metadata_column('imageShiftY', imageShift[..., 1])
 
     print("Adding the camera image...")
     append_camera_image(dataset)
@@ -840,112 +857,29 @@ def augment_data(dataset):
     return dataset
 
 
-def plot_data(dataset):
-    h5Data, header, frameMap, *r = dataset.unpack_vars()
+def append_crack_from_unmatched_pixels(dataset):
+    frameWidth, frameHeight = dataset.get_frame_size()
+    header = dataset.get_header()
 
-    # Prepare for plotting
-    pdf = PdfPages('../../out/fiber-crack.pdf')
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
+    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
 
-    # Draw the color wheel
-    colorWheel = np.empty((h5Data.shape[1], h5Data.shape[2], 2))
-    center = np.array(list(colorWheel.shape[0:2]), dtype=np.int) / 2
-    for x in range(0, colorWheel.shape[0]):
-        for y in range(0, colorWheel.shape[1]):
-            colorWheel[x, y, :] = (-center + [x, y]) / center
+    # Prepare columns for the results.
+    index1 = dataset.append_column('matchedPixelsGauss')
+    index2 = dataset.append_column('matchedPixelsGaussThres')
+    index3 = dataset.append_column('matchedPixelsGaussThresClean')
 
-    ax.imshow(color_map_hsv(colorWheel[..., 0], colorWheel[..., 1], 2.0).swapaxes(0, 1))
-    fig.suptitle("Color Wheel")
-    pdf.savefig(fig)
-    plt.cla()
+    for frameIndex in range(0, dataset.get_frame_number()):
+        frameData = dataset.h5Data[frameIndex, ...]
+        matchedPixels = frameData[:, :, header.index('matched')]
 
-    # plot_optic_flow(pdf, dataset, 130)
-    # pdf.close()
-    #
-    # return
-
-    mappingMin, mappingMax, mappingStep = compute_data_image_mapping(dataset)
-
-    fig = plt.figure()
-    axes = []
-    for f in range(0, 20):
-        axes.append(fig.add_subplot(4, 5, f + 1))
-        axes[f].axis('off')
-
-    fig.subplots_adjust(hspace=0.025, wspace=0.025)
-
-    frameNumber = h5Data.shape[0]
-    crackAreaData = np.zeros((frameNumber, 2))
-
-    # Draw the frame plots.
-    for f in range(0, frameNumber):
-        timeStart = time.time()
-        frameIndex = frameMap[f]
-        print("Frame {}".format(frameIndex))
-        fig.suptitle("Frame {}".format(frameIndex))
-
-        frameData = h5Data[f, :, :, :]
-        frameWidth = frameData.shape[0]
-        frameHeight = frameData.shape[1]
-
-        matchedPixels = h5Data[f, :, :, header.index('matched')]
-        cameraImageData = h5Data[f, :, :, header.index('camera')]
-
-        assert isinstance(matchedPixels, np.ndarray)
-        assert isinstance(cameraImageData, np.ndarray)
-
-        # print("W-plot")
-        if 'W' in header:
-            imageData0 = frameData[:, :, header.index('W')]
-            axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
-
-        # print("UV-plot")
-        # axes[1].imshow(color_map_hsv(frameData[..., header.index('U')],
-        #                              frameData[..., header.index('V')], maxNorm=2.0)
-        #                .swapaxes(0, 1), origin='lower', cmap='gray')
-        axes[1].imshow(color_map_hsv(frameData[..., header.index('u')],
-                                     frameData[..., header.index('v')], maxNorm=50.0)
-                       .swapaxes(0, 1), origin='lower')
-
-        # print("Sigma-plot")
-        axes[2].imshow(frameData[:, :, header.index('sigma')].transpose(), origin='lower', cmap='gray')
-
-        # def strain_to_norm(row):
-        #     strain = row[[header.index('exx'), header.index('exy'), header.index('eyy')]]
-        #     return np.linalg.norm(strain)
-
-        # print("Strain-plot")
-        # imageData3 = np.apply_along_axis(strain_to_norm, 2, frameData)
-        # axes[4].imshow(imageData3, origin='lower', cmap='gray')
-
-        # print("Camera image")
-        cameraImage = frameData[:, :, header.index('camera')]
-        axes[3].imshow(cameraImage.transpose(), origin='lower', cmap='gray')
-
-        axes[5].imshow(matchedPixels.transpose(), origin='lower', cmap='gray')
-
-        # print("Matched pixels, mean convolution.")
+        ### Gaussian smoothing.
         matchedPixelsGauss = skimage.filters.gaussian(matchedPixels, 5.0 / 3.0)
-        axes[6].imshow(matchedPixelsGauss.transpose(), origin='lower', cmap='gray')
 
-        # print("Matched pixels, closing.")
-        # matchedPixelsClosing = scipy.ndimage.morphology.grey_closing(matchedPixels, (3, 3))
-        # axes[6].imshow(matchedPixelsClosing.transpose(), origin='lower', cmap='gray')
-
-        # print("Matched pixels, downsample and threshold")
+        ### Binary thresholding.
         thresholdBinary = lambda t: lambda x: 1.0 if x >= t else 0.0
         matchedPixelsGaussThres = np.vectorize(thresholdBinary(0.5))(matchedPixelsGauss)
 
-        axes[7].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
-
-        # print("Matched pixels, close, downsample, threshold, erode")
-        # matchedPixelsDown = skimage.measure.block_reduce(matchedPixelsClosing, (3, 3), np.mean)
-        # matchedPixelsDown = np.vectorize(threshold(0.5))(matchedPixelsDown)
-        # matchedPixelsUp = skimage.transform.resize(matchedPixelsDown, (frameWidth, frameHeight), order=0)
-
-        # matchedPixelsMorph = scipy.ndimage.morphology.grey_erosion(matchedPixelsUp, (3, 3))
-        # axes[8].imshow(matchedPixelsMorph.transpose(), origin='lower', cmap='gray')
+        ### Morphological filtering.
 
         # Suppress warnings from remove_small_objects/holes which occur when there's a single object/hole.
         with warnings.catch_warnings():
@@ -981,93 +915,208 @@ def plot_data(dataset):
 
             matchedPixelsGaussThresClean = tempResult
 
+        ### Write the results.
+        dataset.h5Data[frameIndex, :, :, index1] = matchedPixelsGauss
+        dataset.h5Data[frameIndex, :, :, index2] = matchedPixelsGaussThres
+        dataset.h5Data[frameIndex, :, :, index3] = matchedPixelsGaussThresClean
+
+
+def append_crack_from_variance(dataset):
+    frameWidth, frameHeight = dataset.get_frame_size()
+    header = dataset.get_header()
+
+    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
+    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+    varFilterRadius = int(dicKernelRadius / 2)
+    selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
+
+    index1 = dataset.append_column('cameraImageVar')
+    index2 = dataset.append_column('cameraImageVarFiltered')
+
+    crackAreaData = np.zeros((dataset.get_frame_number()))
+    for frameIndex in range(0, dataset.get_frame_number()):
+        frameData = dataset.h5Data[frameIndex, ...]
+        cameraImage = frameData[..., header.index('camera')]
+
+        # Compute variance.
+        cameraImageVar = image_variance_filter(cameraImage, varFilterRadius)
+
+        # Threshold.
+        varianceBinary = cameraImageVar < 0.003
+
+        # Clean up.
+        varianceFiltered = varianceBinary.copy()
+        for i in range(0, math.ceil(dicKernelRadius / 2)):
+            varianceFiltered = skimage.morphology.binary_dilation(varianceFiltered, selem)
+
+        # Determine the crack area.
+        if dataset.get_metadata_val(frameIndex, 'hasCameraImage'):
+            totalArea = np.count_nonzero(varianceFiltered)
+            crackAreaData[frameIndex] = totalArea
+
+        dataset.h5Data[frameIndex, ..., index1] = cameraImageVar
+        dataset.h5Data[frameIndex, ..., index2] = varianceFiltered
+
+    dataset.append_metadata_column('crackAreaVariance', crackAreaData)
+
+
+def append_crack_from_entropy(dataset):
+    frameWidth, frameHeight = dataset.get_frame_size()
+    header = dataset.get_header()
+
+    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
+    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+    entropyFilterRadius = int(dicKernelRadius / 2)
+    selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
+
+    index1 = dataset.append_column('cameraImageEntropy')
+    index2 = dataset.append_column('cameraImageEntropyFiltered')
+
+    crackAreaData = np.zeros((dataset.get_frame_number()))
+    for frameIndex in range(0, dataset.get_frame_number()):
+        frameData = dataset.h5Data[frameIndex, ...]
+        cameraImage = frameData[..., header.index('camera')]
+
+        #  Compute entropy.
+        cameraImageEntropy = image_entropy_filter(cameraImage, entropyFilterRadius)
+
+        # Threshold.
+        entropyBinary = cameraImageEntropy < 1.0
+
+        # Clean up.
+        entropyFiltered = entropyBinary.copy()
+        for i in range(0, math.ceil(dicKernelRadius / 2)):
+            entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
+
+        # Determine the crack area.
+        if dataset.get_metadata_val(frameIndex, 'hasCameraImage'):
+            totalArea = np.count_nonzero(entropyFiltered)
+            crackAreaData[frameIndex] = totalArea
+
+        dataset.h5Data[frameIndex, ..., index1] = cameraImageEntropy
+        dataset.h5Data[frameIndex, ..., index2] = entropyFiltered
+
+    dataset.append_metadata_column('crackAreaEntropy', crackAreaData)
+
+
+def compute_and_append_results(dataset):
+    append_crack_from_unmatched_pixels(dataset)
+    append_crack_from_variance(dataset)
+    append_crack_from_entropy(dataset)
+
+
+def plot_data(dataset):
+    h5Data, header, frameMap, *r = dataset.unpack_vars()
+
+    # Prepare for plotting
+    pdf = PdfPages('../../out/fiber-crack.pdf')
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+
+    # Draw the color wheel
+    colorWheel = np.empty((h5Data.shape[1], h5Data.shape[2], 2))
+    center = np.array(list(colorWheel.shape[0:2]), dtype=np.int) / 2
+    for x in range(0, colorWheel.shape[0]):
+        for y in range(0, colorWheel.shape[1]):
+            colorWheel[x, y, :] = (-center + [x, y]) / center
+
+    ax.imshow(color_map_hsv(colorWheel[..., 0], colorWheel[..., 1], 2.0).swapaxes(0, 1))
+    fig.suptitle("Color Wheel")
+    pdf.savefig(fig)
+    plt.cla()
+
+    # plot_optic_flow(pdf, dataset, 130)
+    # pdf.close()
+    #
+    # return
+
+    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
+
+    fig = plt.figure()
+    axes = []
+    for f in range(0, 20):
+        axes.append(fig.add_subplot(4, 5, f + 1))
+        axes[f].axis('off')
+
+    fig.subplots_adjust(hspace=0.025, wspace=0.025)
+
+    frameNumber = h5Data.shape[0]
+    crackAreaData = np.zeros((frameNumber, 2))
+
+    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+    selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
+
+    # Draw the frame plots.
+    for f in range(0, frameNumber):
+        timeStart = time.time()
+        frameIndex = frameMap[f]
+        print("Frame {}".format(frameIndex))
+        fig.suptitle("Frame {}".format(frameIndex))
+
+        frameData = h5Data[f, :, :, :]
+        frameWidth = frameData.shape[0]
+        frameHeight = frameData.shape[1]
+
+        matchedPixels = h5Data[f, :, :, header.index('matched')]
+        cameraImageData = h5Data[f, :, :, header.index('camera')]
+
+        assert isinstance(matchedPixels, np.ndarray)
+        assert isinstance(cameraImageData, np.ndarray)
+
+        # print("W-plot")
+        if 'W' in header:
+            imageData0 = frameData[:, :, header.index('W')]
+            axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
+
+        axes[1].imshow(color_map_hsv(frameData[..., header.index('u')],
+                                     frameData[..., header.index('v')], maxNorm=50.0)
+                       .swapaxes(0, 1), origin='lower')
+
+        # print("Sigma-plot")
+        axes[2].imshow(frameData[:, :, header.index('sigma')].transpose(), origin='lower', cmap='gray')
+
+        # print("Camera image")
+        cameraImage = frameData[:, :, header.index('camera')]
+        axes[3].imshow(cameraImage.transpose(), origin='lower', cmap='gray')
+
+        axes[5].imshow(matchedPixels.transpose(), origin='lower', cmap='gray')
+
+        # print("Matched pixels, mean convolution.")
+        matchedPixelsGauss = frameData[..., header.index('matchedPixelsGauss')]
+        axes[6].imshow(matchedPixelsGauss.transpose(), origin='lower', cmap='gray')
+
+        matchedPixelsGaussThres = frameData[..., header.index('matchedPixelsGaussThres')]
+        axes[7].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
+
+        matchedPixelsGaussThresClean = frameData[..., header.index('matchedPixelsGaussThresClean')]
+
         axes[8].imshow(matchedPixelsGaussThresClean.transpose().astype(np.float), origin='lower', cmap='gray')
         axes[9].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
         contours = skimage.measure.find_contours(matchedPixelsGaussThresClean.transpose(), 0.5)
         for n, contour in enumerate(contours):
             axes[9].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
-        # uBack = frameData[..., header.index('u_back')]
-        # vBack = frameData[..., header.index('v_back')]
-        # axes[9].imshow(color_map_hsv(uBack, vBack, maxNorm=50.0).swapaxes(0, 1), origin='lower')
-        #
-        # sourceMask = matchedPixels > 0.0
-        # targetMask = matchedPixels == 0.0
-        #
-        # uBackFilledIn = masked_gaussian_filter(uBack, sourceMask, targetMask, 50.0 / 3.0)
-        # vBackFilledIn = masked_gaussian_filter(vBack, sourceMask, targetMask, 50.0 / 3.0)
-        #
-        # axes[10].imshow(color_map_hsv(uBackFilledIn, vBackFilledIn, maxNorm=50.0).swapaxes(0, 1), origin='lower')
-        # # axes[11].imshow((uBackFilledIn ** 2 + vBackFilledIn ** 2).swapaxes(0, 1), origin='lower')
-        #
-        # frameSize = frameData.shape[0:2]
-        # matchedPixelsRef = np.zeros(frameSize)
-        # for x in range(0, frameSize[0]):
-        #     for y in range(0, frameSize[1]):
-        #         if matchedPixelsGaussThresClean[x, y] == 1.0:
-        #             continue
-        #
-        #         newX = int(round(x + uBackFilledIn[x, y]))
-        #         newY = int(round(y + vBackFilledIn[x, y]))
-        #         if newX >= 0 and newX < frameSize[0] and newY >= 0 and newY < frameSize[1]:
-        #             matchedPixelsRef[newX, newY] = 1.0
-        #
-        # axes[11].imshow(matchedPixelsRef.transpose(), origin='lower', cmap='gray')
-
-        ###  Variance-based camera image crack extraction.
-        varFilterRadius = int(dicKernelRadius / 2)
-        cameraImageVar = image_variance_filter(cameraImage, varFilterRadius)
-
-        # print("Variance: from {} to {}".format(np.min(cameraImageVar), np.max(cameraImageVar)))
+        # Variance-based camera image crack extraction.
+        cameraImageVar = frameData[..., header.index('cameraImageVar')]
         axes[10].imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
 
-        varianceBinary = cameraImageVar < 0.003
-        # varianceObjectSize = int(frameWidth * frameHeight / 4000)
-
-        varianceFiltered = varianceBinary.copy()
-        for i in range(0, math.ceil(dicKernelRadius / 2)):
-            varianceFiltered = skimage.morphology.binary_dilation(varianceFiltered, selem)
-        # with warnings.catch_warnings():
-        #     warnings.filterwarnings('ignore')
-        #     varianceFiltered = skimage.morphology.remove_small_objects(varianceBinary, varianceObjectSize)
-
-        # axes[11].imshow(varianceFiltered.transpose(), origin='lower', cmap='gray')
-
-        # Determine the crack area.
-        if dataset.h5Metadata[f, dataset.get_metaheader().index('hasCameraImage')]:
-            totalArea = np.count_nonzero(varianceFiltered)
-            crackAreaData[f, 0] = totalArea
+        varianceFiltered = frameData[..., header.index('cameraImageVarFiltered')]
 
         axes[11].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
         varianceContours = skimage.measure.find_contours(varianceFiltered.transpose(), 0.5)
         for n, contour in enumerate(varianceContours):
             axes[11].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
-        ### Entropy-based camera image crack extraction.
-        entropyFilterRadius = int(dicKernelRadius / 2)
-        cameraImageEntropy = image_entropy_filter(cameraImage, entropyFilterRadius)
-
+        # Entropy-based camera image crack extraction.
+        cameraImageEntropy = frameData[..., header.index('cameraImageEntropy')]
         axes[12].imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
 
-        print("Entropy: from {} to {}".format(np.min(cameraImageEntropy), np.max(cameraImageEntropy)))
+        entropyFiltered = frameData[..., header.index('cameraImageEntropyFiltered')]
 
-        entropyBinary = cameraImageEntropy < 1.0
-
-        entropyFiltered = entropyBinary.copy()
-        for i in range(0, math.ceil(dicKernelRadius / 2)):
-            entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
-
-        axes[13].imshow(entropyFiltered.transpose(), origin='lower', cmap='gray')
-
-        # Determine the crack area.
-        if dataset.h5Metadata[f, dataset.get_metaheader().index('hasCameraImage')]:
-            totalArea = np.count_nonzero(entropyFiltered)
-            crackAreaData[f, 1] = totalArea
-
-        axes[14].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
+        axes[13].imshow(cameraImageData.transpose(), origin='lower', cmap='gray')
         entropyContours = skimage.measure.find_contours(entropyFiltered.transpose(), 0.5)
         for n, contour in enumerate(entropyContours):
-            axes[14].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+            axes[13].plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
 
         ### Plot variance and entropy histograms for the image.
@@ -1157,13 +1206,14 @@ def main():
     dataset = load_data()
     print("Data loaded in {:.3f} s. Shape: {} Columns: {}".format(time.time() - timeStart, dataset.h5Data.shape, dataset.get_header()))
 
-    min, max, step = compute_data_image_mapping(dataset)
-    print("Data to image mapping step: {}".format(step))
-
     timeStart = time.time()
     print("Augmenting the data.")
     augment_data(dataset)
     print("Data augmented in {:.3f} s.".format(time.time() - timeStart))
+
+    timeStart = time.time()
+    compute_and_append_results(dataset)
+    print("Results computed and appended in {:.3f} s.".format(time.time() - timeStart))
 
     timeStart = time.time()
     print("Plotting the data.")
