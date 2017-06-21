@@ -6,6 +6,8 @@ np.random.seed(13)  # Fix the seed for reproducibility.
 
 import time
 import warnings
+import inspect
+import hashlib
 
 from data_loading import readDataFromCsv, readDataFromTiff
 import os, math
@@ -43,13 +45,13 @@ dicKernelSize = 55
 # imageBaseName = 'Spec054'
 # dicKernelSize = 85
 
-# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
-# metadataFilename = 'Steel-Epoxy.csv'
-# dataDir = 'data_export'
-# imageDir = 'raw_images'
-# imageBaseName = 'Spec054'
-# dicKernelSize = 85
-# preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
+basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
+metadataFilename = 'Steel-Epoxy.csv'
+dataDir = 'data_export'
+imageDir = 'raw_images'
+imageBaseName = 'Spec054'
+dicKernelSize = 85
+preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
@@ -58,13 +60,13 @@ dicKernelSize = 55
 # imageBaseName = 'Spec010'
 # dicKernelSize = 55
 
-basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
-metadataFilename = 'PTFE-Epoxy.csv'
-dataDir = 'data_export'
-# dataDir = 'data_export_fine'
-imageDir = 'raw_images'
-imageBaseName = 'Spec048'
-dicKernelSize = 81
+# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
+# metadataFilename = 'PTFE-Epoxy.csv'
+# dataDir = 'data_export'
+# # dataDir = 'data_export_fine'
+# imageDir = 'raw_images'
+# imageBaseName = 'Spec048'
+# dicKernelSize = 81
 
 # # PTFE-Epoxy with fine spatial and temporal resolutions, mid-experiment.
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Spec48'
@@ -86,6 +88,7 @@ dicKernelSize = 81
 
 maxFrames = 99999
 reloadOriginalData = False
+recomputeResults = False
 
 
 #############################################
@@ -111,15 +114,20 @@ class Dataset:
         metaheader = self.get_metaheader()
         return self.h5Data, header, frameMap, metadata, metaheader
 
-    def append_column(self, newColumnName):
+    def create_or_get_column(self, newColumnName):
         """
-        Appends a new empty column to the data.
+        Appends a new empty column to the data. If the column already exists, returns its index.
 
         Note: we do not insert the data directly, because typically we don't want to
         copy it into a single huge array. The size would be to big.
         :param newColumnName:
         :return:
         """
+
+        # Check if the column already exists.
+        header = self.get_header()
+        if newColumnName in header:
+            return header.index(newColumnName)
 
         # Make sure we still have preallocated space available.
         assert(self.h5Data.shape[-1] > self.h5Header.shape[0])
@@ -130,17 +138,22 @@ class Dataset:
         newColumnIndex = self.h5Header.shape[0] - 1
         return newColumnIndex
 
-    def append_metadata_column(self, newColumnName, newColumnData):
+    def create_or_update_metadata_column(self, newColumnName, newColumnData):
 
         assert(newColumnData.shape[0] == self.h5Metadata.shape[0])
 
-        self.h5Metadata.resize(self.h5Metadata.shape[1] + 1, axis=1)
-        self.h5Metaheader.resize(self.h5Metaheader.shape[0] + 1, axis=0)
-        self.h5Metadata[:, -1] = newColumnData
-        self.h5Metaheader[-1] = newColumnName.encode('ascii')
+        # Check if the column already exists.
+        metaheader = self.get_metaheader()
+        if newColumnName not in metaheader:
+            self.h5Metadata.resize(self.h5Metadata.shape[1] + 1, axis=1)
+            self.h5Metaheader.resize(self.h5Metaheader.shape[0] + 1, axis=0)
+            self.h5Metadata[:, -1] = newColumnData
+            self.h5Metaheader[-1] = newColumnName.encode('ascii')
 
-        newColumnIndex = self.h5Metaheader.shape[0] - 1
-        return newColumnIndex
+            return self.h5Metaheader.shape[0] - 1
+        else:
+            self.h5Metadata[:, metaheader.index(newColumnName)] = newColumnData
+            return metaheader.index(newColumnName)
 
     def get_data_image_mapping(self):
         return (self.get_attr('mappingMin'), self.get_attr('mappingMax'), self.get_attr('mappingStep'))
@@ -167,6 +180,9 @@ class Dataset:
 
     def get_attr(self, attrName):
         return self.h5Data.attrs[attrName]
+
+    def has_attr(self, attrName):
+        return attrName in self.h5Data.attrs
 
     def get_header(self):
         return self.h5Header[:].astype(np.str).tolist()
@@ -665,7 +681,7 @@ def append_camera_image(dataset):
 
     hasCameraImageMask = np.zeros((h5Data.shape[0]))
 
-    columnIndex = dataset.append_column('camera')
+    columnIndex = dataset.create_or_get_column('camera')
     frameNumber = h5Data.shape[0]
     for f in range(0, frameNumber):
         print("Frame {}/{}".format(f, frameNumber))
@@ -686,7 +702,7 @@ def append_camera_image(dataset):
             dataset.set_attr('cameraImageSize', cameraImage.shape)
             hasCameraImageMask[f] = True
 
-    dataset.append_metadata_column('hasCameraImage', hasCameraImageMask)
+    dataset.create_or_update_metadata_column('hasCameraImage', hasCameraImageMask)
 
     return dataset
 
@@ -697,9 +713,9 @@ def append_matched_pixels(dataset):
     frameSize = dataset.get_frame_size()
     min, max, step = dataset.get_data_image_mapping()
 
-    matchedColumnIndex = dataset.append_column('matched')
-    uBackColumnIndex = dataset.append_column('u_back')
-    vBackColumnIndex = dataset.append_column('v_back')
+    matchedColumnIndex = dataset.create_or_get_column('matched')
+    uBackColumnIndex = dataset.create_or_get_column('u_back')
+    vBackColumnIndex = dataset.create_or_get_column('v_back')
 
     frameNumber = h5Data.shape[0]
     for f in range(0, frameNumber):
@@ -853,14 +869,10 @@ def append_crack_from_unmatched_pixels(dataset):
 
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
 
-    if 'matchedPixelsGauss' in header:
-        print('Cracks from unmatched pixels are already in the data. Skipping.')
-        return
-
     # Prepare columns for the results.
-    index1 = dataset.append_column('matchedPixelsGauss')
-    index2 = dataset.append_column('matchedPixelsGaussThres')
-    index3 = dataset.append_column('matchedPixelsGaussThresClean')
+    index1 = dataset.create_or_get_column('matchedPixelsGauss')
+    index2 = dataset.create_or_get_column('matchedPixelsGaussThres')
+    index3 = dataset.create_or_get_column('matchedPixelsGaussThresClean')
 
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, ...]
@@ -904,9 +916,6 @@ def append_crack_from_unmatched_pixels(dataset):
             for i in range(currentDilation, dicKernelRadius + 1):
                 tempResult = skimage.morphology.binary_dilation(tempResult, selem)
 
-            print("Applied {} extra dilation rounds to compensate for the DIC kernel."
-                  .format(dicKernelRadius - currentDilation))
-
             matchedPixelsGaussThresClean = tempResult
 
         ### Write the results.
@@ -916,20 +925,18 @@ def append_crack_from_unmatched_pixels(dataset):
 
 
 def append_crack_from_variance(dataset):
+    print("Computing cracks from variance.")
+
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
 
-    if 'cameraImageVar' in header:
-        print('Cracks from variance are already in the data. Skipping.')
-        return
-
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
     dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
-    varFilterRadius = int(dicKernelRadius / 2)
+    varFilterRadius = int(dicKernelRadius)
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
 
-    index1 = dataset.append_column('cameraImageVar')
-    index2 = dataset.append_column('cameraImageVarFiltered')
+    index1 = dataset.create_or_get_column('cameraImageVar')
+    index2 = dataset.create_or_get_column('cameraImageVarFiltered')
 
     crackAreaData = np.zeros((dataset.get_frame_number()))
     for frameIndex in range(0, dataset.get_frame_number()):
@@ -959,27 +966,25 @@ def append_crack_from_variance(dataset):
     physicalFrameSize = dataset.get_attr('physicalFrameSize')
     physicalFrameArea = physicalFrameSize[0] * physicalFrameSize[1]
 
-    dataset.append_metadata_column('crackAreaVariance', crackAreaData)
-    dataset.append_metadata_column('crackAreaVariancePhysical', crackAreaData / frameArea * physicalFrameArea)
+    dataset.create_or_update_metadata_column('crackAreaVariance', crackAreaData)
+    dataset.create_or_update_metadata_column('crackAreaVariancePhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
 def append_crack_from_entropy(dataset):
     # todo a lot of repetition between the variance and the entropy implementations.
     # refactor, if more features are added.
+    print("Computing cracks from entropy.")
+
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
 
-    if 'cameraImageEntropy' in header:
-        print('Cracks from entropy are already in the data. Skipping.')
-        return
-
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
     dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
-    entropyFilterRadius = int(dicKernelRadius / 2)
+    entropyFilterRadius = int(dicKernelRadius)
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
 
-    index1 = dataset.append_column('cameraImageEntropy')
-    index2 = dataset.append_column('cameraImageEntropyFiltered')
+    index1 = dataset.create_or_get_column('cameraImageEntropy')
+    index2 = dataset.create_or_get_column('cameraImageEntropyFiltered')
 
     crackAreaData = np.zeros((dataset.get_frame_number()))
     for frameIndex in range(0, dataset.get_frame_number()):
@@ -990,7 +995,7 @@ def append_crack_from_entropy(dataset):
         cameraImageEntropy = image_entropy_filter(cameraImage, entropyFilterRadius)
 
         # Threshold.
-        entropyBinary = cameraImageEntropy < 1.0
+        entropyBinary = cameraImageEntropy < 2.0
 
         # Clean up.
         entropyFiltered = entropyBinary.copy()
@@ -1009,8 +1014,40 @@ def append_crack_from_entropy(dataset):
     physicalFrameSize = dataset.get_attr('physicalFrameSize')
     physicalFrameArea = physicalFrameSize[0] * physicalFrameSize[1]
 
-    dataset.append_metadata_column('crackAreaEntropy', crackAreaData)
-    dataset.append_metadata_column('crackAreaEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
+    dataset.create_or_update_metadata_column('crackAreaEntropy', crackAreaData)
+    dataset.create_or_update_metadata_column('crackAreaEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
+
+
+def apply_function_if_code_changed(dataset, function):
+    """
+    Calls a function that computes and writes data to the dataset.
+    Stores the has of the function's source code as metadata.
+    If the function has not changed, it isn't applied to the data.
+
+    :param dataset:
+    :param function:
+    :return:
+    """
+    # Get a string containing the full function source.
+    sourceLines = inspect.getsourcelines(function)
+    functionSource = ''.join(sourceLines[0])
+    functionName = function.__name__
+    attrName = '_sourceHash_' + functionName
+
+    currentHash = hashlib.sha1(functionSource.encode('utf-8')).hexdigest()
+
+    if 'cameraImageVar' in dataset.get_header() and not recomputeResults:
+        oldHash = dataset.get_attr(attrName) if dataset.has_attr(attrName) else None
+
+        if currentHash == oldHash:
+            print("Function {} has not changed, skipping. Source hash: {}".format(functionName, currentHash))
+            return
+
+    print("Applying function {} to the dataset.".format(functionName))
+
+    function(dataset)
+
+    dataset.set_attr(attrName, currentHash)
 
 
 def augment_data(dataset):
@@ -1035,8 +1072,8 @@ def augment_data(dataset):
     # Add the image shift to the metadata.
     imageShift = compute_avg_flow(dataset)
 
-    dataset.append_metadata_column('imageShiftX', imageShift[..., 0])
-    dataset.append_metadata_column('imageShiftY', imageShift[..., 1])
+    dataset.create_or_update_metadata_column('imageShiftX', imageShift[..., 0])
+    dataset.create_or_update_metadata_column('imageShiftY', imageShift[..., 1])
 
     print("Adding the camera image...")
     append_camera_image(dataset)
@@ -1050,10 +1087,11 @@ def augment_data(dataset):
 
 
 def compute_and_append_results(dataset):
-    append_crack_from_unmatched_pixels(dataset)
 
-    append_crack_from_variance(dataset)
-    append_crack_from_entropy(dataset)
+    apply_function_if_code_changed(dataset, append_crack_from_unmatched_pixels)
+
+    apply_function_if_code_changed(dataset, append_crack_from_variance)
+    apply_function_if_code_changed(dataset, append_crack_from_entropy)
 
 
 def plot_contour(axes, backgroundImage, binaryImage):
@@ -1159,7 +1197,8 @@ def plot_data(dataset):
         varianceHist = np.histogram(cameraImageVar, bins=16, range=(0, np.max(cameraImageVar)))[0]
         entropyHist = np.histogram(cameraImageEntropy, bins=16, range=(0, np.max(cameraImageEntropy)))[0]
 
-        axes[18].bar(np.linspace(0, np.max(cameraImageVar), 16), varianceHist)
+        varHistDomain = np.linspace(0, np.max(cameraImageVar), 16)
+        axes[18].bar(varHistDomain * 100, varianceHist)
         axes[19].bar(np.linspace(0, np.max(cameraImageEntropy), 16), entropyHist)
 
         axes[18].axis('on')
@@ -1215,7 +1254,7 @@ def plot_data(dataset):
     ax.plot(dataset.get_metadata_column('crackAreaVariancePhysical'), label='Variance estimation')
     ax.plot(dataset.get_metadata_column('crackAreaEntropyPhysical'), label='Entropy  estimation')
     # ax.plot(np.sqrt(crackAreaData))
-    ax.grid(True)
+    ax.grid(which='both')
     plt.ylabel('Micrometer^2')
     plt.legend()
 
