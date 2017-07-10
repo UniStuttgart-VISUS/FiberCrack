@@ -37,6 +37,8 @@ dataFormat = 'csv'
 imageFilenameFormat = '{}-{:04d}_0.tif'
 
 dicKernelSize = 55
+plotCrackAreaGroundTruth = False
+crackAreaGroundTruthPath = ''
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
 # metadataFilename = 'Steel-Epoxy.csv'
@@ -45,13 +47,13 @@ dicKernelSize = 55
 # imageBaseName = 'Spec054'
 # dicKernelSize = 85
 
-basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
-metadataFilename = 'Steel-Epoxy.csv'
-dataDir = 'data_export'
-imageDir = 'raw_images'
-imageBaseName = 'Spec054'
-dicKernelSize = 85
-preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
+# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
+# metadataFilename = 'Steel-Epoxy.csv'
+# dataDir = 'data_export'
+# imageDir = 'raw_images'
+# imageBaseName = 'Spec054'
+# dicKernelSize = 85
+# preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
@@ -60,13 +62,15 @@ preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 # imageBaseName = 'Spec010'
 # dicKernelSize = 55
 
-# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
-# metadataFilename = 'PTFE-Epoxy.csv'
-# dataDir = 'data_export'
-# # dataDir = 'data_export_fine'
-# imageDir = 'raw_images'
-# imageBaseName = 'Spec048'
-# dicKernelSize = 81
+basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
+metadataFilename = 'PTFE-Epoxy.csv'
+dataDir = 'data_export'
+# dataDir = 'data_export_fine'
+imageDir = 'raw_images'
+imageBaseName = 'Spec048'
+dicKernelSize = 81
+plotCrackAreaGroundTruth = True
+crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 # # PTFE-Epoxy with fine spatial and temporal resolutions, mid-experiment.
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Spec48'
@@ -811,13 +815,21 @@ def append_data_image_mapping(dataset):
 def append_physical_frame_size(dataset):
     h5Data, header, *r = dataset.unpack_vars()
 
-    minX = h5Data[0, 0, 0, header.index('X')]
-    maxX = h5Data[0, -1, -1, header.index('X')]
-    minY = h5Data[0, 0, 0, header.index('Y')]
-    maxY = h5Data[0, -1, -1, header.index('Y')]
+    # We cannot simply look at the corner pixels, since sometimes
+    # the physical coordinates are reported incorrectly (at least near the edges).
+    # Instead, find literally the minimum and maximum coordinates present in the data.
+    xColumn = h5Data[0, :, :, header.index('X')]
+    yColumn = h5Data[0, :, :, header.index('Y')]
+    minX = np.min(xColumn)
+    maxX = np.max(xColumn)
+    minY = np.min(yColumn)
+    maxY = np.max(yColumn)
+
+    physicalDomain = np.array([[minX, minY], [maxX, maxY]])
 
     physicalSize = np.abs(np.array([maxX - minX, maxY - minY]))
     print('Computed physical size: {}'.format(physicalSize))
+    print('Physical domain: {}'.format(physicalDomain))
     dataset.set_attr('physicalFrameSize', physicalSize)
 
 
@@ -951,7 +963,7 @@ def append_crack_from_variance(dataset):
 
         # Clean up.
         varianceFiltered = varianceBinary.copy()
-        for i in range(0, math.ceil(dicKernelRadius / 2)):
+        for i in range(0, math.ceil(dicKernelRadius / 2.0)):
             varianceFiltered = skimage.morphology.binary_dilation(varianceFiltered, selem)
 
         # Determine the crack area.
@@ -995,11 +1007,11 @@ def append_crack_from_entropy(dataset):
         cameraImageEntropy = image_entropy_filter(cameraImage, entropyFilterRadius)
 
         # Threshold.
-        entropyBinary = cameraImageEntropy < 2.0
+        entropyBinary = cameraImageEntropy < 1.0
 
         # Clean up.
         entropyFiltered = entropyBinary.copy()
-        for i in range(0, math.ceil(dicKernelRadius / 2)):
+        for i in range(0, math.ceil(entropyFilterRadius / 2.0)):
             entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
 
         # Determine the crack area.
@@ -1016,6 +1028,61 @@ def append_crack_from_entropy(dataset):
 
     dataset.create_or_update_metadata_column('crackAreaEntropy', crackAreaData)
     dataset.create_or_update_metadata_column('crackAreaEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
+
+
+def append_crack_from_unmatched_and_entropy(dataset):
+
+    header = dataset.get_header()
+    selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
+
+    frameWidth, frameHeight = dataset.get_frame_size()
+    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
+    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+    # Use a smaller entropy kernel size, since we narrow the search area using unmatched pixels.
+    entropyFilterRadius = int(dicKernelRadius * 0.5)
+
+    index = dataset.create_or_get_column('cracksFromUnmatchedAndEntropy')
+
+    crackAreaData = np.zeros((dataset.get_frame_number()))
+    for frameIndex in range(0, dataset.get_frame_number()):
+        frameData = dataset.h5Data[frameIndex, :, :, :]
+        # Fetch the unmatched pixels.
+        unmathedPixels = frameData[..., header.index('matchedPixelsGaussThresClean')]  == 0
+
+        # Manually remove the unmatched pixels that are pushing into the image from the sides.
+        paddingWidth = int(frameWidth * 0.1)
+        unmathedPixels[:paddingWidth, :] = False
+        unmathedPixels[-paddingWidth:, :] = False
+
+        # Dilate the unmatched pixels crack, and later use it as a search filter.
+        unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
+        unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
+        unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
+
+        #todo reuse entropy code (copy-pasting right now), but note that we might need a different kernel size.
+        imageEntropy = image_entropy_filter(frameData[..., header.index('camera')], int(entropyFilterRadius))
+        entropyBinary = imageEntropy < 1.0
+
+        entropyFiltered = entropyBinary.copy()
+        for i in range(0, math.ceil(entropyFilterRadius / 2.0)):
+            entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
+
+        # Crack = low entropy near unmatched pixels.
+        cracks = np.logical_and(unmathedPixels, entropyFiltered)
+
+        # Determine the crack area.
+        if dataset.get_metadata_val(frameIndex, 'hasCameraImage'):
+            totalArea = np.count_nonzero(cracks)
+            crackAreaData[frameIndex] = totalArea
+
+        dataset.h5Data[frameIndex, ..., index] = cracks
+
+    frameArea = frameWidth * frameHeight
+    physicalFrameSize = dataset.get_attr('physicalFrameSize')
+    physicalFrameArea = physicalFrameSize[0] * physicalFrameSize[1]
+
+    dataset.create_or_update_metadata_column('crackAreaUnmatchedAndEntropy', crackAreaData)
+    dataset.create_or_update_metadata_column('crackAreaUnmatchedAndEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
 def apply_function_if_code_changed(dataset, function):
@@ -1093,19 +1160,21 @@ def compute_and_append_results(dataset):
     apply_function_if_code_changed(dataset, append_crack_from_variance)
     apply_function_if_code_changed(dataset, append_crack_from_entropy)
 
+    apply_function_if_code_changed(dataset, append_crack_from_unmatched_and_entropy)
+
 
 def plot_contour(axes, backgroundImage, binaryImage):
     axes.imshow(backgroundImage.transpose(), origin='lower', cmap='gray')
     entropyContours = skimage.measure.find_contours(binaryImage.transpose(), 0.5)
     for n, contour in enumerate(entropyContours):
-        axes.plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+        axes.plot(contour[:, 1], contour[:, 0], linewidth=0.25, color='white')
 
 
 def plot_data(dataset):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
 
     # Prepare for plotting
-    pdf = PdfPages('../../out/fiber-crack.pdf')
+    pdf = PdfPages('../../out/fiber/fiber-crack.pdf')
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
 
@@ -1193,6 +1262,10 @@ def plot_data(dataset):
         axes[12].imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
         plot_contour(axes[13], cameraImageData, entropyFiltered)
 
+        # Unmatched pixels + entropy crack extraction.
+        cracksFromUnmatchedAndEntropy = frameData[..., header.index('cracksFromUnmatchedAndEntropy')]
+        plot_contour(axes[14], cameraImageData, cracksFromUnmatchedAndEntropy)
+
         # Plot variance and entropy histograms for the image.
         varianceHist = np.histogram(cameraImageVar, bins=16, range=(0, np.max(cameraImageVar)))[0]
         entropyHist = np.histogram(cameraImageEntropy, bins=16, range=(0, np.max(cameraImageEntropy)))[0]
@@ -1253,10 +1326,44 @@ def plot_data(dataset):
     fig.suptitle("Crack area in the current frame")
     ax.plot(dataset.get_metadata_column('crackAreaVariancePhysical'), label='Variance estimation')
     ax.plot(dataset.get_metadata_column('crackAreaEntropyPhysical'), label='Entropy  estimation')
-    # ax.plot(np.sqrt(crackAreaData))
+    ax.plot(dataset.get_metadata_column('crackAreaUnmatchedAndEntropyPhysical'), label='Unmatched&Entropy  estimation')
+
     ax.grid(which='both')
-    plt.ylabel('Micrometer^2')
+    ax.set_ylabel('Micrometer^2')
     plt.legend()
+
+    # A hacky way to convert x axis from frame indices to frame numbers.
+    locs, labels = plt.xticks()
+    for i in range(len(labels)):
+        frameIndex = int(locs[i])
+        frameNumber = str(frameMap[frameIndex]) if 0 <= frameIndex < len(frameMap) else ''
+        labels[i].set_text(frameNumber)
+        plt.xticks(locs, labels)
+
+    if (plotCrackAreaGroundTruth):
+        # Convert frame numbers into frame indices, i.e. align with X axis.
+        def get_closest_frame_index(frameNumber):
+            return np.count_nonzero(np.array(frameMap, dtype=np.int)[:-1] < frameNumber)
+        groundTruth = np.genfromtxt(os.path.join(basePath, crackAreaGroundTruthPath), delimiter=',')
+        groundTruth[:, 0] = [get_closest_frame_index(frameNumber) for frameNumber in groundTruth[:, 0]]
+
+        # Compute crack area percentage error for each frame with ground truth available.
+        percentageError = np.zeros(groundTruth.shape[0])
+        crackAreaEntropy = dataset.get_metadata_column('crackAreaUnmatchedAndEntropyPhysical')
+        for i, frameIndex in enumerate(groundTruth[:, 0]):
+            truth = groundTruth[i, 1]
+            estimated = crackAreaEntropy[int(frameIndex)]
+            percentageError[i] = math.fabs((truth - estimated) / truth) * 100
+
+        # Plot the ground truth.
+        ax.scatter(groundTruth[:, 0], groundTruth[:, 1], marker='x', label='Measured by hand')
+
+        # Plot the percentage error on the second Y-axis.
+        ax2 = ax.twinx()
+        ax2.scatter(groundTruth[:, 0], percentageError, marker='o', s=8, c='green', label='Percentage error (entropy)')
+        ax2.set_ylim(bottom=0)
+        ax2.set_ylabel('Error, %')
+        plt.legend()
 
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
 
@@ -1264,7 +1371,9 @@ def plot_data(dataset):
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
     mappingText = 'Data to camera image mapping\n'
-    mappingText += 'Data size: {} Image size: {}\n'.format(list(h5Data.shape[1:3]), dataset.get_attr('cameraImageSize'))
+    mappingText += 'Data size: {} Image size: {}\n'.format(
+        list(h5Data.shape[1:3]), dataset.get_attr('cameraImageSize'))
+    mappingText += 'Physical size: {}\n'.format(dataset.get_attr('physicalFrameSize'))
     mappingText += 'Min: {} Max: {} Step: {}\n'.format(mappingMin, mappingMax, mappingStep)
 
     ax.text(0.1, 0.1, mappingText)
