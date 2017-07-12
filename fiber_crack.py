@@ -35,10 +35,19 @@ preloadedDataDir = 'C:/preloaded_data'
 preloadedDataFilename = None  # By default, decide automatically.
 dataFormat = 'csv'
 imageFilenameFormat = '{}-{:04d}_0.tif'
+outDir = 'T:/projects/SimtechOne/out/fiber'
 
 dicKernelSize = 55
 plotCrackAreaGroundTruth = False
 crackAreaGroundTruthPath = ''
+
+globalParams = {
+    'textureKernelMultiplier': 1.0,
+    'entropyThreshold': 1.0,
+    'varianceThreshold': 0.003,
+    'unmatchedPixelsPadding': 0.0,
+    'unmatchedAndEntropyKernelMultiplier': 0.5
+}
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
 # metadataFilename = 'Steel-Epoxy.csv'
@@ -92,15 +101,10 @@ crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 maxFrames = 99999
 reloadOriginalData = False
-recomputeResults = False
+recomputeResults = True
 
 
 #############################################
-
-# todo Sigma-filtering when searching for unmatched pixels
-# todo Strip NaNs from the metadata/metaheader
-# todo PTFE-Epoxy frame 4465 data is incomplete.
-
 
 class Dataset:
 
@@ -158,6 +162,9 @@ class Dataset:
         else:
             self.h5Metadata[:, metaheader.index(newColumnName)] = newColumnData
             return metaheader.index(newColumnName)
+
+    def get_column_at_frame(self, frame, columnName):
+        return self.h5Data[frame, ..., self.get_header().index(columnName)]
 
     def get_data_image_mapping(self):
         return (self.get_attr('mappingMin'), self.get_attr('mappingMax'), self.get_attr('mappingStep'))
@@ -481,194 +488,6 @@ def image_entropy_filter(data, windowRadius):
     return np.apply_along_axis(scipy.stats.entropy, axis=2, arr=histograms)
 
 
-def train_net(XTrain, yTrain, XVal, yVal, patchSize):
-    timeStart = time.time()
-    model = keras.models.Sequential()
-
-    # model.add(
-    #     Convolution3D(32, patchSize[0], 3, 3, input_shape=(patchSize[0], patchSize[1], patchSize[2], XTrain.shape[-1]),
-    #                   border_mode="same",
-    #                   activation="relu", W_constraint=maxnorm(3)))
-    # model.add(Dropout(0.2))
-    # model.add(Convolution3D(32, patchSize[0], 3, 3, activation="relu", border_mode="same"))
-    # model.add(MaxPooling3D(pool_size=(patchSize[0], 2, 2)))
-    # model.add(Convolution3D(64, 1, 3, 3, activation="relu", border_mode="same"))
-    # # model.add(Dropout(0.2))
-    # # model.add(Convolution3D(64, patchSize[0], 3, 3, activation="relu", border_mode="same"))
-    # # model.add(MaxPooling3D(pool_size=(patchSize[0], 2, 2)))
-    # # model.add(Convolution3D(128, 3, 3, activation="relu", border_mode="same"))
-    # # model.add(Dropout(0.2))
-    # # model.add(Convolution3D(128, 3, 3, activation="relu", border_mode="same"))
-    # # model.add(MaxPooling3D(pool_size=(2, 2)))
-    # model.add(Flatten())
-    #
-    # model.add(Dropout(0.2))
-    # model.add(Dense(256, activation="relu", W_constraint=maxnorm(3)))
-    # model.add(Dropout(0.2))
-    # model.add(Dense(128, activation="relu", W_constraint=maxnorm(3)))
-    # model.add(Dropout(0.2))
-    # model.add(Dense(1))
-    #
-    # model.add(Dense(512, input_dim=XTrain.shape[-1], activation="relu", W_constraint=maxnorm(3)))
-    # model.add(Dense(256, activation="relu", W_constraint=maxnorm(3)))
-    # model.add(Dense(1))
-
-    model.add(Dense(256, input_dim=XTrain.shape[-1], activation="relu", W_constraint=maxnorm(3)))
-    model.add(Dense(128, activation="relu", W_constraint=maxnorm(3)))
-    model.add(Dense(32, activation="relu", W_constraint=maxnorm(3)))
-    model.add(Dense(1))
-
-    epochNum = 5
-    learningRate = 0.01
-    batchSize = 32
-
-    optimizer = keras.optimizers.RMSprop(lr=learningRate)
-    model.compile(loss='mse', optimizer=optimizer)
-    print("Finished compiling the net in {:.3f} s.".format(time.time() - timeStart))
-
-    history = model.fit(XTrain, yTrain, validation_data=(XVal, yVal), nb_epoch=epochNum, batch_size=batchSize,
-                        verbose=0)
-
-    print("Finished training a net in {:.3f} s.)".format(time.time() - timeStart))
-    print("Training loss: {}".format(history.history['loss']))
-    print("Val      loss: {}".format(history.history['val_loss']))
-
-    return model, history
-
-
-def predict_frame(data, header, targetFrame, timeWindow, targetFeature, features):
-    patchSize = (4, 16, 16)
-    # Whether should collapse all spatial and temporal dimensions and use a 1D vector representation.
-    flattenInput = True
-
-    featureIndices = [header.index(f) for f in features]
-    data = data[targetFrame - timeWindow:targetFrame + 1, :, :, featureIndices]
-
-    patchNumber = (
-        (data.shape[0] - patchSize[0] + 1 - 1),  # We want to predict the next frame, so we can't use the last frame // todo actually, I think I should include it, since we later 'cut off' the test data.
-        (data.shape[1] - patchSize[1] + 1),
-        (data.shape[2] - patchSize[2] + 1))
-    patchNumberFlat = patchNumber[0] * patchNumber[1] * patchNumber[2]
-    netDataX = np.empty((patchNumberFlat, patchSize[0], patchSize[1], patchSize[2], len(features)))
-    netDataY = np.empty((patchNumberFlat, 1))
-
-    for t in range(0, patchNumber[0]):
-        for x in range(0, patchNumber[1]):
-            for y in range(0, patchNumber[2]):
-                patchIndex = t * patchNumber[1] * patchNumber[2] + x * patchNumber[2] + y
-                netDataX[patchIndex, :, :, :, :] = data[t:t + patchSize[0], x:x + patchSize[1], y:y + patchSize[2], :]
-                netDataY[patchIndex, 0] = data[t + patchSize[0],
-                                               x + int(patchSize[1] / 2),
-                                               y + int(patchSize[2] / 2),
-                                               features.index(targetFeature)]
-
-    if flattenInput:
-        netDataX = netDataX.reshape((patchNumberFlat, -1))
-        netDataY = netDataY.reshape((patchNumberFlat, -1))
-
-    startTestIndex = (patchNumber[0] - 1) * patchNumber[1] * patchNumber[2]
-
-    trainSetRatio = 0.95
-    permutation = np.random.permutation(startTestIndex)
-    trainIndices = permutation[:int(netDataX.shape[0] * trainSetRatio) - 1]
-    valIndices = permutation[:int(netDataY.shape[0] * (1.0 - trainSetRatio))]
-
-    XTrain = netDataX[trainIndices]
-    yTrain = netDataY[trainIndices]
-    XVal = netDataX[valIndices]
-    yVal = netDataY[valIndices]
-
-    normalizerX = Normalizer().fit(XTrain, XTrain.ndim - 1)
-    XTrain = normalizerX.scale(XTrain)
-    # yTrain = normalizer.scale(yTrain)
-    XVal = normalizerX.scale(XVal)
-    # yVal = normalizer.scale(yVal)
-
-    model, history = train_net(XTrain, yTrain, XVal, yVal, patchSize)
-    XTest = normalizerX.scale(netDataX[startTestIndex:,...])
-    yTest = netDataY[startTestIndex:, ...]
-
-    prediction = model.predict(XTest)
-    testScore = model.evaluate(XTest, yTest, verbose=0)
-    print("Test score: {}".format(testScore))
-
-    # Reshape for plotting a 2D image.
-    prediction = np.array(prediction).reshape((patchNumber[1], -1))
-
-    # We can't make a prediction near image edges, pad the prediction.
-    predictionImage = np.zeros((data.shape[1], data.shape[2]))
-    patchRX = int(patchSize[1] / 2)
-    patchRY = int(patchSize[2] / 2)
-    predictionImage[patchRX:data.shape[1] - patchSize[1] + patchRX + 1,
-    patchRY:data.shape[2] - patchSize[2] + patchRY + 1] = prediction
-    predictionImage = predictionImage.transpose()
-
-    return predictionImage, testScore
-
-
-def predict(dataset):
-    raise RuntimeError('Code not tested since refactoring to H5Py.')
-
-    timeWindow = 6
-
-    data, header, frameMap, *r = dataset.unpack_vars()
-
-    vmin = -0.5
-    vmax = 0.5
-    pdf = PdfPages('..\out\prediction.pdf')
-    fig = plt.figure()
-    axes = [fig.add_subplot(2, 4, i + 1) for i in range(0, 8)]
-
-    for frameIndex in range(int(data.shape[0] / 2 + timeWindow - 1), int(data.shape[0] / 2)):
-    # for frameIndex in range(timeWindow + 1, data.shape[0]):
-        print("Making a prediction for frame {}".format(frameIndex))
-        timeStart = time.time()
-
-        # Train a model and make a prediction.
-        predictionImageW, testScoreW = predict_frame(data, header, frameIndex, timeWindow, 'W',
-                                                     ['U', 'V', 'sigma', 'W'])
-        predictionImageSigma, testScoreSigma = predict_frame(data, header, frameIndex, timeWindow, 'sigma',
-                                                             ['U', 'V', 'sigma', 'W'])
-
-        # Plot the actual data.
-        frameData = data[frameIndex, :, :, :].swapaxes(0, 1)  # Transpose.
-        prevFrameData = data[frameIndex - 1, :, :, :].swapaxes(0, 1)
-
-        dataW = frameData[:, :, header.index('W')]
-        dataSigma = frameData[:, :, header.index('sigma')]
-
-        predictionDiffW = np.absolute(dataW - predictionImageW)
-        predictionDiffSigma = np.absolute(dataSigma - predictionImageSigma)
-
-        dataDiffW = np.absolute(dataW - prevFrameData[:, :, header.index('W')])
-        dataDiffSigma = np.absolute(dataSigma - prevFrameData[:, :, header.index('sigma')])
-
-        fig.suptitle("Frame {}. Score: {:.3f}, {:.3f}".format(frameMap[frameIndex], testScoreW, testScoreSigma))
-
-        axes[0].imshow(dataW, origin='lower', cmap='gray', vmin=vmin, vmax=vmax, interpolation='nearest')
-        axes[4].imshow(dataSigma, origin='lower', cmap='gray', vmin=vmin, vmax=vmax, interpolation='nearest')
-
-        # Plot the prediction.
-        axes[1].imshow(predictionImageW, origin='lower', cmap='gray', vmin=vmin, vmax=vmax, interpolation='nearest')
-        axes[5].imshow(predictionImageSigma, origin='lower', cmap='gray', vmin=vmin, vmax=vmax, interpolation='nearest')
-
-        # Plot the difference with prediction.
-        axes[2].imshow(predictionDiffW, origin='lower', cmap='gray', vmin=0.0, vmax=1.0, interpolation='nearest')
-        axes[6].imshow(predictionDiffSigma, origin='lower', cmap='gray', vmin=0.0, vmax=1.0, interpolation='nearest')
-
-        # Plot the difference with prev frame.
-        axes[3].imshow(dataDiffW, origin='lower', cmap='gray', vmin=0.0, vmax=1.0, interpolation='nearest')
-        axes[7].imshow(dataDiffSigma, origin='lower', cmap='gray', vmin=0.0, vmax=1.0, interpolation='nearest')
-
-        print("Processed a frame in {} s.".format(time.time() - timeStart))
-
-        pdf.savefig(fig, bbox_inches='tight')
-        for a in axes:
-            a.clear()
-
-    pdf.close()
-
-
 def append_camera_image(dataset):
     """
     Appends a column containing grayscale data from the camera.
@@ -936,15 +755,12 @@ def append_crack_from_unmatched_pixels(dataset):
         dataset.h5Data[frameIndex, :, :, index3] = matchedPixelsGaussThresClean
 
 
-def append_crack_from_variance(dataset):
+def append_crack_from_variance(dataset, textureKernelSize, varianceThreshold=0.003):
     print("Computing cracks from variance.")
 
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
 
-    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
-    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
-    varFilterRadius = int(dicKernelRadius)
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
 
     index1 = dataset.create_or_get_column('cameraImageVar')
@@ -956,14 +772,14 @@ def append_crack_from_variance(dataset):
         cameraImage = frameData[..., header.index('camera')]
 
         # Compute variance.
-        cameraImageVar = image_variance_filter(cameraImage, varFilterRadius)
+        cameraImageVar = image_variance_filter(cameraImage, textureKernelSize)
 
         # Threshold.
-        varianceBinary = cameraImageVar < 0.003
+        varianceBinary = cameraImageVar < varianceThreshold
 
         # Clean up.
         varianceFiltered = varianceBinary.copy()
-        for i in range(0, math.ceil(dicKernelRadius / 2.0)):
+        for i in range(0, math.ceil(textureKernelSize / 2.0)):
             varianceFiltered = skimage.morphology.binary_dilation(varianceFiltered, selem)
 
         # Determine the crack area.
@@ -982,7 +798,7 @@ def append_crack_from_variance(dataset):
     dataset.create_or_update_metadata_column('crackAreaVariancePhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
-def append_crack_from_entropy(dataset):
+def append_crack_from_entropy(dataset, textureKernelSize, entropyThreshold=1.0):
     # todo a lot of repetition between the variance and the entropy implementations.
     # refactor, if more features are added.
     print("Computing cracks from entropy.")
@@ -990,9 +806,6 @@ def append_crack_from_entropy(dataset):
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
 
-    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
-    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
-    entropyFilterRadius = int(dicKernelRadius)
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
 
     index1 = dataset.create_or_get_column('cameraImageEntropy')
@@ -1004,14 +817,14 @@ def append_crack_from_entropy(dataset):
         cameraImage = frameData[..., header.index('camera')]
 
         #  Compute entropy.
-        cameraImageEntropy = image_entropy_filter(cameraImage, entropyFilterRadius)
+        cameraImageEntropy = image_entropy_filter(cameraImage, textureKernelSize)
 
         # Threshold.
-        entropyBinary = cameraImageEntropy < 1.0
+        entropyBinary = cameraImageEntropy < entropyThreshold
 
         # Clean up.
         entropyFiltered = entropyBinary.copy()
-        for i in range(0, math.ceil(entropyFilterRadius / 2.0)):
+        for i in range(0, math.ceil(textureKernelSize / 2.0)):
             entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
 
         # Determine the crack area.
@@ -1030,16 +843,15 @@ def append_crack_from_entropy(dataset):
     dataset.create_or_update_metadata_column('crackAreaEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
-def append_crack_from_unmatched_and_entropy(dataset):
+def append_crack_from_unmatched_and_entropy(dataset, textureKernelSize, unmatchedAndEntropyKernelMultiplier,
+                                            entropyThreshold, unmatchedPixelsPadding=0.1):
 
     header = dataset.get_header()
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
 
     frameWidth, frameHeight = dataset.get_frame_size()
-    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
-    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
     # Use a smaller entropy kernel size, since we narrow the search area using unmatched pixels.
-    entropyFilterRadius = int(dicKernelRadius * 0.5)
+    entropyFilterRadius = int(textureKernelSize * unmatchedAndEntropyKernelMultiplier)
 
     index = dataset.create_or_get_column('cracksFromUnmatchedAndEntropy')
 
@@ -1050,18 +862,19 @@ def append_crack_from_unmatched_and_entropy(dataset):
         unmathedPixels = frameData[..., header.index('matchedPixelsGaussThresClean')]  == 0
 
         # Manually remove the unmatched pixels that are pushing into the image from the sides.
-        paddingWidth = int(frameWidth * 0.1)
-        unmathedPixels[:paddingWidth, :] = False
-        unmathedPixels[-paddingWidth:, :] = False
+        if unmatchedPixelsPadding > 0.0:
+            paddingWidth = int(frameWidth * unmatchedPixelsPadding)
+            unmathedPixels[:paddingWidth, :] = False
+            unmathedPixels[-paddingWidth:, :] = False
 
         # Dilate the unmatched pixels crack, and later use it as a search filter.
         unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
         unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
         unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
 
-        #todo reuse entropy code (copy-pasting right now), but note that we might need a different kernel size.
+        # todo reuse entropy code (copy-pasting right now), but note that we might need a different kernel size.
         imageEntropy = image_entropy_filter(frameData[..., header.index('camera')], int(entropyFilterRadius))
-        entropyBinary = imageEntropy < 1.0
+        entropyBinary = imageEntropy < entropyThreshold
 
         entropyFiltered = entropyBinary.copy()
         for i in range(0, math.ceil(entropyFilterRadius / 2.0)):
@@ -1099,9 +912,17 @@ def apply_function_if_code_changed(dataset, function):
     sourceLines = inspect.getsourcelines(function)
     functionSource = ''.join(sourceLines[0])
     functionName = function.__name__
-    attrName = '_sourceHash_' + functionName
 
-    currentHash = hashlib.sha1(functionSource.encode('utf-8')).hexdigest()
+    callSignature = inspect.signature(function)
+    callArguments = {}
+    for callParameter in callSignature.parameters:
+        if callParameter in globalParams:
+            callArguments[callParameter] = globalParams[callParameter]
+
+    callArgumentsString = ''.join([key + str(callArguments[key]) for key in callArguments])
+
+    attrName = '_functionHash_' + functionName
+    currentHash = hashlib.sha1((functionSource + callArgumentsString).encode('utf-8')).hexdigest()
 
     if 'cameraImageVar' in dataset.get_header() and not recomputeResults:
         oldHash = dataset.get_attr(attrName) if dataset.has_attr(attrName) else None
@@ -1112,7 +933,8 @@ def apply_function_if_code_changed(dataset, function):
 
     print("Applying function {} to the dataset.".format(functionName))
 
-    function(dataset)
+    callArguments['dataset'] = dataset
+    function(**callArguments)
 
     dataset.set_attr(attrName, currentHash)
 
@@ -1154,6 +976,10 @@ def augment_data(dataset):
 
 
 def compute_and_append_results(dataset):
+    # Compute derived parameters.
+    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
+    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+    globalParams['textureKernelSize'] = int(dicKernelRadius * globalParams['textureKernelMultiplier'])
 
     apply_function_if_code_changed(dataset, append_crack_from_unmatched_pixels)
 
@@ -1167,14 +993,14 @@ def plot_contour(axes, backgroundImage, binaryImage):
     axes.imshow(backgroundImage.transpose(), origin='lower', cmap='gray')
     entropyContours = skimage.measure.find_contours(binaryImage.transpose(), 0.5)
     for n, contour in enumerate(entropyContours):
-        axes.plot(contour[:, 1], contour[:, 0], linewidth=0.25, color='white')
+        axes.plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
 
 def plot_data(dataset):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
 
     # Prepare for plotting
-    pdf = PdfPages('../../out/fiber/fiber-crack.pdf')
+    pdf = PdfPages(os.path.join(outDir, '/fiber-crack.pdf'))
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
 
