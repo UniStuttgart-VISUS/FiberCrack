@@ -8,6 +8,7 @@ import time
 import warnings
 import inspect
 import hashlib
+import argparse
 
 from data_loading import readDataFromCsv, readDataFromTiff
 import os, math
@@ -15,19 +16,13 @@ import re
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import colorsys
-import pickle
-import keras
 import skimage.measure, skimage.transform, skimage.util, skimage.filters, skimage.feature, skimage.morphology
 import scipy.ndimage.morphology, scipy.stats
-from keras.layers import Dense
-from keras.constraints import maxnorm
 from PIL import Image
 from os import path
 import h5py
 
-from numpy_extras import slice_nd
-from Normalizer import Normalizer
-from image_tools import masked_gaussian_filter
+from volume_tools import write_volume_to_datraw
 
 ############### Configuration ###############
 
@@ -101,7 +96,7 @@ crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 maxFrames = 99999
 reloadOriginalData = False
-recomputeResults = True
+recomputeResults = False
 
 
 #############################################
@@ -919,7 +914,7 @@ def apply_function_if_code_changed(dataset, function):
         if callParameter in globalParams:
             callArguments[callParameter] = globalParams[callParameter]
 
-    callArgumentsString = ''.join([key + str(callArguments[key]) for key in callArguments])
+    callArgumentsString = ''.join([key + str(callArguments[key]) for key in sorted(callArguments)])
 
     attrName = '_functionHash_' + functionName
     currentHash = hashlib.sha1((functionSource + callArgumentsString).encode('utf-8')).hexdigest()
@@ -928,7 +923,7 @@ def apply_function_if_code_changed(dataset, function):
         oldHash = dataset.get_attr(attrName) if dataset.has_attr(attrName) else None
 
         if currentHash == oldHash:
-            print("Function {} has not changed, skipping. Source hash: {}".format(functionName, currentHash))
+            print("Function {} has not changed, skipping.".format(functionName))
             return
 
     print("Applying function {} to the dataset.".format(functionName))
@@ -1209,7 +1204,35 @@ def plot_data(dataset):
     pdf.close()
 
 
+def export_crack_volume(dataset: 'Dataset'):
+    """
+    Build a volume by concatenating crack areas from each frame,
+    save to the disk in datraw format.
+    :param dataset:
+    :return:
+    """
+    frameSize = dataset.get_frame_size()
+
+    frameNumber = dataset.get_frame_number()
+    # The volume should be exported in Z,Y,X C-order.
+    volume = np.empty((frameNumber, frameSize[1], frameSize[0]), dtype=np.uint8)
+
+    for f in range(0, frameNumber):
+        crackArea = dataset.get_column_at_frame(f, 'cracksFromUnmatchedAndEntropy')
+        crackAreaUint8 = np.zeros_like(crackArea, dtype=np.uint8)
+        crackAreaUint8[crackArea == 1.0] = 255
+
+        volume[f, ...] = crackAreaUint8.transpose()
+
+    write_volume_to_datraw(volume, os.path.join(outDir, 'crack-volume.raw'))
+
+
 def main():
+
+    # Parse the arguments.
+    parser = argparse.ArgumentParser('Fiber crack.')
+    parser.add_argument('-c', '--command', default='plot', choices=['plot', 'export-crack-volume'])
+    args = parser.parse_args()
 
     timeStart = time.time()
     print("Loading the data.")
@@ -1226,9 +1249,13 @@ def main():
     print("Results computed and appended in {:.3f} s.".format(time.time() - timeStart))
 
     timeStart = time.time()
-    print("Plotting the data.")
-    plot_data(dataset)
-    print("Data plotted in {:.3f} s.".format(time.time() - timeStart))
+    print("Executing command: {}".format(args.command))
+    commandMap = {
+        'plot': lambda: plot_data(dataset),
+        'export-crack-volume': lambda: export_crack_volume(dataset),
+    }
+    commandMap[args.command]()
+    print("Command executed in {:.3f} s.".format(time.time() - timeStart))
 
     # timeStart = time.time()
     # print("Making a prediction.")
