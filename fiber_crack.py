@@ -478,8 +478,7 @@ def image_entropy_filter(data, windowRadius):
 
     # Important: data range and the number of histogram bins must be equal (skimage expects it so).
     histograms = skimage.filters.rank.windowed_histogram(dataUint, selem=windowMask, n_bins=16)
-    # return np.sum(histograms, axis=2)
-    # histograms = histograms.astype(np.float)
+
     return np.apply_along_axis(scipy.stats.entropy, axis=2, arr=histograms)
 
 
@@ -950,7 +949,7 @@ def augment_data(dataset):
     # Add the data to image mapping to the dataset.
     append_data_image_mapping(dataset)
 
-    # Add the physical dimensions of the data (in micrometers).
+    # Add the physical dimensions of the data (in millimeters).
     append_physical_frame_size(dataset)
 
     # Add the image shift to the metadata.
@@ -995,7 +994,9 @@ def plot_data(dataset):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
 
     # Prepare for plotting
-    pdf = PdfPages(os.path.join(outDir, '/fiber-crack.pdf'))
+    pdfPath = os.path.join(outDir, 'fiber-crack.pdf')
+    print("Plotting to {}".format(pdfPath))
+    pdf = PdfPages(pdfPath)
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
 
@@ -1150,7 +1151,7 @@ def plot_data(dataset):
     ax.plot(dataset.get_metadata_column('crackAreaUnmatchedAndEntropyPhysical'), label='Unmatched&Entropy  estimation')
 
     ax.grid(which='both')
-    ax.set_ylabel('Micrometer^2')
+    ax.set_ylabel('Millimeter^2')
     plt.legend()
 
     # A hacky way to convert x axis from frame indices to frame numbers.
