@@ -455,8 +455,16 @@ def color_map_hsv(X, Y, maxNorm):
     return result
 
 
-def morphology_prune(data, iter):
-    # Reference: http://homepages.inf.ed.ac.uk/rbf/HIPR2/thin.htm
+def image_morphology_prune(data, iter):
+    """
+    Apply morphological pruning, removing small branching out 'tails'
+    from a 'skeleton'.
+    Reference: http://homepages.inf.ed.ac.uk/rbf/HIPR2/thin.htm
+
+    :param data:
+    :param iter:
+    :return:
+    """
 
     # The structuring element for pruning.
     # Here '2' means empty cell (match anything).
@@ -483,6 +491,12 @@ def morphology_prune(data, iter):
 
 
 def image_variance_filter(data, windowRadius):
+    """
+    Apply a local variance filter to an image.
+    :param data:
+    :param windowRadius:
+    :return:
+    """
     windowLength = windowRadius * 2 + 1
     windowShape = (windowLength, windowLength)
 
@@ -492,6 +506,13 @@ def image_variance_filter(data, windowRadius):
 
 
 def image_entropy_filter(data, windowRadius):
+    """
+    Apply a local entropy filter to an image.
+    (Used as a detector of distribution 'uniformity'.)
+    :param data:
+    :param windowRadius:
+    :return:
+    """
     dataUint = (data * 16).astype(np.uint8)
     windowLength = windowRadius * 2 + 1
     windowMask = np.ones((windowLength, windowLength), dtype=np.bool)
@@ -546,6 +567,15 @@ def append_camera_image(dataset):
 
 
 def append_matched_pixels(dataset):
+    """
+    Computes which pixels have been 'matched to' in each frame
+    from the reference frame.
+    Also stores the 'back-flow', which maps pixels back into the reference frame.
+
+    Note that the matching is computed w.r.t. to the overall image shift.
+    :param dataset:
+    :return:
+    """
     h5Data, header, frameMap, *r = dataset.unpack_vars()
     imageShift = dataset.get_image_shift()
     frameSize = dataset.get_frame_size()
@@ -580,6 +610,12 @@ def append_matched_pixels(dataset):
 
 
 def zero_pixels_without_tracking(dataset):
+    """
+    Remove the flow data for pixels that have lost tracking,
+    sicne it's unreliable.
+    :param dataset:
+    :return:
+    """
     h5Data, header, frameMap, *r = dataset.unpack_vars()
     # frameSize = dataset.get_frame_size()
     for f in range(0, h5Data.shape[0]):
@@ -590,38 +626,6 @@ def zero_pixels_without_tracking(dataset):
         data[..., header.index('v')] *= filter
         h5Data[f, ...] = data
         # todo is it faster to use an intermediate buffer? or should I write to hdf5 directly?
-
-
-def plot_optic_flow(pdf, dataset, frameIndex):
-    h5Data, header, frameMap, *r = dataset.unpack_vars()
-    imageShift = dataset.get_image_shift()
-    frameSize = dataset.get_frame_size()
-    min, max, step = dataset.get_data_image_mapping()
-
-    imageShift = imageShift[frameIndex]
-
-    frameFlow = h5Data[frameIndex, :, :, :][:, :, [header.index('u'), header.index('v')]]
-    frameFlow[:, :, 0] = np.rint((frameFlow[:, :, 0] - imageShift[0]) / step[0])
-    frameFlow[:, :, 1] = np.rint((frameFlow[:, :, 1] - imageShift[1]) / step[1])
-
-
-    # Shift the array to transform to the current frame coordinates.
-    cropMin = np.maximum(np.rint(imageShift / step).astype(np.int), 0)
-    cropMax = np.minimum(np.rint(frameSize + imageShift / step).astype(np.int), frameSize)
-    cropSize = cropMax - cropMin
-    plottedFlow = np.zeros(frameFlow.shape)
-    plottedFlow[0:cropSize[0], 0:cropSize[1], :] = frameFlow[cropMin[0]:cropMax[0], cropMin[1]:cropMax[1], :]
-    plottedFlow = plottedFlow.swapaxes(0, 1)
-
-    X, Y = np.meshgrid(np.arange(0, frameSize[0]), np.arange(0, frameSize[1]))
-
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
-    ax.quiver(X, Y, plottedFlow[:, :, 0], plottedFlow[:, :, 1], angles='uv', scale_units='xy', scale=1,
-              width=0.003, headwidth=2)
-    # pdf.savefig(fig)
-    # plt.cla()
-    plt.show()
 
 
 def append_data_image_mapping(dataset):
@@ -647,6 +651,12 @@ def append_data_image_mapping(dataset):
 
 
 def append_physical_frame_size(dataset):
+    """
+    Find out the physical size of the specimen (more precisely, the size
+    of the region of interest) and store it in the data.
+    :param dataset:
+    :return:
+    """
     h5Data, header, *r = dataset.unpack_vars()
 
     # We cannot simply look at the corner pixels, since sometimes
@@ -699,11 +709,17 @@ def compute_avg_flow(dataset):
 
 
 def append_crack_from_unmatched_pixels(dataset, dicKernelRadius):
+    """
+    Detect the crack pixels based on which pixels haven't been 'matched to'
+    from the reference frame. These pixels have 'appeared out of nowhere' and
+    potentially represent the crack.
 
+    :param dataset:
+    :param dicKernelRadius:
+    :return:
+    """
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
-
-    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
 
     # Prepare columns for the results.
     index1 = dataset.create_or_get_column('matchedPixelsGauss')
@@ -715,15 +731,15 @@ def append_crack_from_unmatched_pixels(dataset, dicKernelRadius):
         frameData = dataset.h5Data[frameIndex, ...]
         matchedPixels = frameData[:, :, header.index('matched')]
 
-        ### Gaussian smoothing.
+        # Gaussian smoothing.
         matchedPixelsGauss = skimage.filters.gaussian(matchedPixels, 2.0)
 
-        ### Binary thresholding.
+        # Binary thresholding.
         thresholdBinary = lambda t: lambda x: 1.0 if x >= t else 0.0
         matchedPixelsGaussThres = np.vectorize(thresholdBinary(0.5))(matchedPixelsGauss)
         # matchedPixelsGaussThres = skimage.morphology.binary_dilation(matchedPixels, selem)
 
-        ### Morphological filtering.
+        # Morphological filtering.
 
         # Suppress warnings from remove_small_objects/holes which occur when there's a single object/hole.
         with warnings.catch_warnings():
@@ -754,13 +770,22 @@ def append_crack_from_unmatched_pixels(dataset, dicKernelRadius):
 
             matchedPixelsGaussThresClean = tempResult
 
-        ### Write the results.
+        # Write the results.
         dataset.h5Data[frameIndex, :, :, index1] = matchedPixelsGauss
         dataset.h5Data[frameIndex, :, :, index2] = matchedPixelsGaussThres
         dataset.h5Data[frameIndex, :, :, index3] = matchedPixelsGaussThresClean
 
 
 def append_crack_from_variance(dataset, textureKernelSize, varianceThreshold=0.003):
+    """
+    Detect crack pixels based on local variance computed from the current camera frame.
+    (Purely image-based technique.)
+
+    :param dataset:
+    :param textureKernelSize:
+    :param varianceThreshold:
+    :return:
+    """
     print("Computing cracks from variance.")
 
     frameWidth, frameHeight = dataset.get_frame_size()
@@ -804,6 +829,15 @@ def append_crack_from_variance(dataset, textureKernelSize, varianceThreshold=0.0
 
 
 def append_crack_from_entropy(dataset, textureKernelSize, entropyThreshold=1.0):
+    """
+    Detect crack pixels based on local entropy computed from the current camera frame.
+    (Purely image-based technique.)
+    :param dataset:
+    :param textureKernelSize:
+    :param entropyThreshold:
+    :return:
+    """
+
     # todo a lot of repetition between the variance and the entropy implementations.
     # refactor, if more features are added.
     print("Computing cracks from entropy.")
@@ -850,7 +884,21 @@ def append_crack_from_entropy(dataset, textureKernelSize, entropyThreshold=1.0):
 
 def append_crack_from_unmatched_and_entropy(dataset, textureKernelSize, unmatchedAndEntropyKernelMultiplier,
                                             entropyThreshold, unmatchedPixelsPadding=0.1):
+    """
+    Detect crack pixels based on both the local entropy filtering and
+    unmatched pixels.
+    A hybrid method.
 
+    Narrowing the search region based on unmatched pixels allows to reduce
+    the kernel size for the entropy filter and increase the spatial precision.
+
+    :param dataset:
+    :param textureKernelSize:
+    :param unmatchedAndEntropyKernelMultiplier:
+    :param entropyThreshold:
+    :param unmatchedPixelsPadding:
+    :return:
+    """
     header = dataset.get_header()
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
 
@@ -904,7 +952,15 @@ def append_crack_from_unmatched_and_entropy(dataset, textureKernelSize, unmatche
 
 
 def append_reference_frame_crack(dataset, dicKernelRadius):
+    """
+    Compute the crack path in the reference frame based on sigma,
+    i.e. based on which pixels have lost tracking and can no longer be found
+    in the current frame.
 
+    :param dataset:
+    :param dicKernelRadius:
+    :return:
+    """
     frameSize = dataset.get_frame_size()
 
     index1 = dataset.create_or_get_column('sigmaFiltered')
@@ -933,7 +989,7 @@ def append_reference_frame_crack(dataset, dicKernelRadius):
         binarySigmaSkeleton = skimage.morphology.skeletonize(binarySigmaFiltered)
 
         # Prune the skeleton from small branches.
-        binarySigmaSkeletonPruned = morphology_prune(binarySigmaSkeleton, int(frameSize[0] / 100))
+        binarySigmaSkeletonPruned = image_morphology_prune(binarySigmaSkeleton, int(frameSize[0] / 100))
 
         dataset.h5Data[frameIndex, ..., index1] = binarySigmaFiltered
         dataset.h5Data[frameIndex, ..., index2] = binarySigmaSkeleton
@@ -943,7 +999,7 @@ def append_reference_frame_crack(dataset, dicKernelRadius):
 def apply_function_if_code_changed(dataset, function):
     """
     Calls a function that computes and writes data to the dataset.
-    Stores the has of the function's source code as metadata.
+    Stores the hash of the function's source code as metadata.
     If the function has not changed, it isn't applied to the data.
 
     :param dataset:
@@ -982,6 +1038,13 @@ def apply_function_if_code_changed(dataset, function):
 
 
 def augment_data(dataset):
+    """
+    Extends the raw data with some pre-processing.
+    Doesn't compute any 'results', but rather information that can help compute the results.
+
+    :param dataset:
+    :return:
+    """
     header = dataset.get_header()
     metaheader = dataset.get_metaheader()
 
@@ -1041,6 +1104,13 @@ def plot_contour_overlay(axes, backgroundImage, binaryImage):
 
 
 def plot_original_data_for_frame(axes, frameData, header):
+    """
+    Plots raw data for a given frame.
+    :param axes:
+    :param frameData:
+    :param header:
+    :return:
+    """
     if 'W' in header:
         imageData0 = frameData[:, :, header.index('W')]
         axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
@@ -1055,6 +1125,14 @@ def plot_original_data_for_frame(axes, frameData, header):
 
 
 def plot_unmatched_cracks_for_frame(axes, frameData, header):
+    """
+    Plots cracks detected from unmatched pixels, i.e. pixels
+    that haven't been 'matched to', for a given frame.
+    :param axes:
+    :param frameData:
+    :param header:
+    :return:
+    """
     matchedPixels = frameData[..., header.index('matched')]
     cameraImageData = frameData[..., header.index('camera')]
 
@@ -1073,6 +1151,13 @@ def plot_unmatched_cracks_for_frame(axes, frameData, header):
 
 
 def plot_image_cracks_for_frame(axes, frameData, header):
+    """
+    Plot crack detected with image-based texture-feature techniques.
+    :param axes:
+    :param frameData:
+    :param header:
+    :return:
+    """
     cameraImageData = frameData[..., header.index('camera')]
 
     # Variance-based camera image crack extraction.
@@ -1095,7 +1180,13 @@ def plot_image_cracks_for_frame(axes, frameData, header):
 
 
 def plot_reference_crack_for_frame(axes, frameData, header):
-
+    """
+    Plots the crack path in the reference frame.
+    :param axes:
+    :param frameData:
+    :param header:
+    :return:
+    """
     binarySigmaFiltered = frameData[..., header.index('sigmaFiltered')]
     binarySigmaSkeleton = frameData[..., header.index('sigmaSkeleton')]
     binarySigmaSkeletonPruned = frameData[..., header.index('sigmaSkeletonPruned')]
@@ -1126,6 +1217,12 @@ def plot_feature_histograms_for_frame(axes, frameData, header):
 
 
 def plot_crack_area_chart(dataset):
+    """
+    Plots area of the crack (a scalar) detected by various methods
+    against time (or more precisely, frame index).
+    :param dataset:
+    :return:
+    """
     frameMap = dataset.get_frame_map()
 
     fig = plt.figure()
@@ -1176,6 +1273,38 @@ def plot_crack_area_chart(dataset):
     plt.legend()
 
     return fig
+
+
+def plot_optic_flow(pdf, dataset, frameIndex):
+    h5Data, header, frameMap, *r = dataset.unpack_vars()
+    imageShift = dataset.get_image_shift()
+    frameSize = dataset.get_frame_size()
+    min, max, step = dataset.get_data_image_mapping()
+
+    imageShift = imageShift[frameIndex]
+
+    frameFlow = h5Data[frameIndex, :, :, :][:, :, [header.index('u'), header.index('v')]]
+    frameFlow[:, :, 0] = np.rint((frameFlow[:, :, 0] - imageShift[0]) / step[0])
+    frameFlow[:, :, 1] = np.rint((frameFlow[:, :, 1] - imageShift[1]) / step[1])
+
+
+    # Shift the array to transform to the current frame coordinates.
+    cropMin = np.maximum(np.rint(imageShift / step).astype(np.int), 0)
+    cropMax = np.minimum(np.rint(frameSize + imageShift / step).astype(np.int), frameSize)
+    cropSize = cropMax - cropMin
+    plottedFlow = np.zeros(frameFlow.shape)
+    plottedFlow[0:cropSize[0], 0:cropSize[1], :] = frameFlow[cropMin[0]:cropMax[0], cropMin[1]:cropMax[1], :]
+    plottedFlow = plottedFlow.swapaxes(0, 1)
+
+    X, Y = np.meshgrid(np.arange(0, frameSize[0]), np.arange(0, frameSize[1]))
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    ax.quiver(X, Y, plottedFlow[:, :, 0], plottedFlow[:, :, 1], angles='uv', scale_units='xy', scale=1,
+              width=0.003, headwidth=2)
+    # pdf.savefig(fig)
+    # plt.cla()
+    plt.show()
 
 
 def plot_data_mapping(dataset):
