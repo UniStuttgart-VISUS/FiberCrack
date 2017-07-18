@@ -1,5 +1,7 @@
 import numpy as np
 
+from numpy_extras import slice_along_axis
+
 np.random.seed(13)  # Fix the seed for reproducibility.
 # import tensorflow as tf
 # tf.set_random_seed(13)
@@ -41,7 +43,9 @@ globalParams = {
     'entropyThreshold': 1.0,
     'varianceThreshold': 0.003,
     'unmatchedPixelsPadding': 0.0,
-    'unmatchedAndEntropyKernelMultiplier': 0.5
+    'unmatchedAndEntropyKernelMultiplier': 0.5,
+    'exportedVolumeTimestepWidth': 3,
+    'exportedVolumeSkippedFrames': 5
 }
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
@@ -103,6 +107,20 @@ recomputeResults = False
 
 class Dataset:
 
+    @staticmethod
+    def get_data_feature_number():
+        """
+        Specifies how many columns should be created when allocating an hdf5 array.
+        :return:
+        """
+        # When allocating a continuous hdf5 file we need to know the final size
+        # of the data in advance.
+
+        augmentedFeatureNumber = 4
+        resultsFeatureNumber = 15  # Approximately, leave some empty.
+
+        return augmentedFeatureNumber + resultsFeatureNumber
+
     def __init__(self, h5File):
         self.h5Data = h5File['data']
         self.h5Header = h5File['header']
@@ -158,7 +176,7 @@ class Dataset:
             self.h5Metadata[:, metaheader.index(newColumnName)] = newColumnData
             return metaheader.index(newColumnName)
 
-    def get_column_at_frame(self, frame, columnName):
+    def get_column_at_frame(self, frame, columnName) -> np.ndarray:
         return self.h5Data[frame, ..., self.get_header().index(columnName)]
 
     def get_data_image_mapping(self):
@@ -196,6 +214,9 @@ class Dataset:
     def get_metaheader(self):
         return self.h5Metaheader[:].astype(np.str).tolist()
 
+    def get_frame_map(self):
+        return self.h5FrameMap[:].tolist()
+
 
 def load_csv_data():
     if preloadedDataFilename is None:
@@ -210,7 +231,7 @@ def load_csv_data():
         print('Loading data from CSV files.')
 
         # We need to know the size of data that will be added later to allocate an hdf5 file.
-        extraFeatureNumber = augment_data_extra_feature_number()
+        extraFeatureNumber = Dataset.get_data_feature_number()
         originalFeatureNumber = None
 
         # Load the metadata, describing each frame of the experiment.
@@ -307,7 +328,7 @@ def load_tiff_data():
         print('Loading data from TIFF files.')
 
         # We need to know the size of data that will be added later to allocate an hdf5 file.
-        extraFeatureNumber = augment_data_extra_feature_number()
+        extraFeatureNumber = Dataset.get_data_feature_number()
 
         # Files with feature data, each contains N frames, one per time step.
         tiffFileMap = {
@@ -677,17 +698,7 @@ def compute_avg_flow(dataset):
     return avgFlow
 
 
-def augment_data_extra_feature_number():
-    # When allocating a continuous hdf5 file we need to know the final size
-    # of the data in advance.
-
-    augmentedFeatureNumber = 4
-    resultsFeatureNumber = 10  # Approximately, leave some empty.
-
-    return augmentedFeatureNumber + resultsFeatureNumber
-
-
-def append_crack_from_unmatched_pixels(dataset):
+def append_crack_from_unmatched_pixels(dataset, dicKernelRadius):
 
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
@@ -699,16 +710,18 @@ def append_crack_from_unmatched_pixels(dataset):
     index2 = dataset.create_or_get_column('matchedPixelsGaussThres')
     index3 = dataset.create_or_get_column('matchedPixelsGaussThresClean')
 
+    selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, ...]
         matchedPixels = frameData[:, :, header.index('matched')]
 
         ### Gaussian smoothing.
-        matchedPixelsGauss = skimage.filters.gaussian(matchedPixels, 5.0 / 3.0)
+        matchedPixelsGauss = skimage.filters.gaussian(matchedPixels, 2.0)
 
         ### Binary thresholding.
         thresholdBinary = lambda t: lambda x: 1.0 if x >= t else 0.0
         matchedPixelsGaussThres = np.vectorize(thresholdBinary(0.5))(matchedPixelsGauss)
+        # matchedPixelsGaussThres = skimage.morphology.binary_dilation(matchedPixels, selem)
 
         ### Morphological filtering.
 
@@ -725,7 +738,6 @@ def append_crack_from_unmatched_pixels(dataset):
             holePixelNumber = np.count_nonzero(tempResult[cropSelector] == False)
             tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
 
-            selem = scipy.ndimage.morphology.generate_binary_structure(tempResult.ndim, 2)
             tempResult = skimage.morphology.binary_erosion(tempResult, selem)
             tempResult = skimage.morphology.binary_erosion(tempResult, selem)
             tempResult = skimage.morphology.remove_small_objects(tempResult, min_size=maxObjectSize)
@@ -736,7 +748,6 @@ def append_crack_from_unmatched_pixels(dataset):
             tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
 
             # Don't erode back: instead, compensate for the kernel used during DIC.
-            dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
             currentDilation = 2  # Because we dilated twice without eroding back.
             for i in range(currentDilation, dicKernelRadius + 1):
                 tempResult = skimage.morphology.binary_dilation(tempResult, selem)
@@ -892,6 +903,43 @@ def append_crack_from_unmatched_and_entropy(dataset, textureKernelSize, unmatche
     dataset.create_or_update_metadata_column('crackAreaUnmatchedAndEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
+def append_reference_frame_crack(dataset, dicKernelRadius):
+
+    frameSize = dataset.get_frame_size()
+
+    index1 = dataset.create_or_get_column('sigmaFiltered')
+    index2 = dataset.create_or_get_column('sigmaSkeleton')
+    index3 = dataset.create_or_get_column('sigmaSkeletonPruned')
+
+    for frameIndex in range(0, dataset.get_frame_number()):
+
+        # Get the original sigma plot, with untrackable pixels as 'ones' (cracks).
+        binarySigma = dataset.get_column_at_frame(frameIndex, 'sigma') < 0
+
+        binarySigmaFiltered = binarySigma.copy()
+        maxObjectSize = int(frameSize[0] * frameSize[1] / 1000)
+
+        # Erode the cracks to remove smaller noise.
+        selem = scipy.ndimage.morphology.generate_binary_structure(binarySigma.ndim, 2)
+        for i in range(0, math.ceil(dicKernelRadius / 2)):
+            binarySigmaFiltered = skimage.morphology.binary_erosion(binarySigmaFiltered, selem)
+
+        # Remove tiny disconnected chunks of cracks as unnecessary noise.
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            binarySigmaFiltered = skimage.morphology.remove_small_objects(binarySigmaFiltered, maxObjectSize)
+
+        # Compute the skeleton.
+        binarySigmaSkeleton = skimage.morphology.skeletonize(binarySigmaFiltered)
+
+        # Prune the skeleton from small branches.
+        binarySigmaSkeletonPruned = morphology_prune(binarySigmaSkeleton, int(frameSize[0] / 100))
+
+        dataset.h5Data[frameIndex, ..., index1] = binarySigmaFiltered
+        dataset.h5Data[frameIndex, ..., index2] = binarySigmaSkeleton
+        dataset.h5Data[frameIndex, ..., index3] = binarySigmaSkeletonPruned
+
+
 def apply_function_if_code_changed(dataset, function):
     """
     Calls a function that computes and writes data to the dataset.
@@ -973,6 +1021,7 @@ def compute_and_append_results(dataset):
     # Compute derived parameters.
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
     dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+    globalParams['dicKernelRadius'] = dicKernelRadius
     globalParams['textureKernelSize'] = int(dicKernelRadius * globalParams['textureKernelMultiplier'])
 
     apply_function_if_code_changed(dataset, append_crack_from_unmatched_pixels)
@@ -981,180 +1030,117 @@ def compute_and_append_results(dataset):
     apply_function_if_code_changed(dataset, append_crack_from_entropy)
 
     apply_function_if_code_changed(dataset, append_crack_from_unmatched_and_entropy)
+    apply_function_if_code_changed(dataset, append_reference_frame_crack)
 
 
-def plot_contour(axes, backgroundImage, binaryImage):
+def plot_contour_overlay(axes, backgroundImage, binaryImage):
     axes.imshow(backgroundImage.transpose(), origin='lower', cmap='gray')
     entropyContours = skimage.measure.find_contours(binaryImage.transpose(), 0.5)
     for n, contour in enumerate(entropyContours):
         axes.plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
 
 
-def plot_data(dataset):
-    h5Data, header, frameMap, *r = dataset.unpack_vars()
+def plot_original_data_for_frame(axes, frameData, header):
+    if 'W' in header:
+        imageData0 = frameData[:, :, header.index('W')]
+        axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
+    axes[1].imshow(color_map_hsv(frameData[..., header.index('u')],
+                                 frameData[..., header.index('v')], maxNorm=50.0)
+                   .swapaxes(0, 1), origin='lower')
+    # print("Sigma-plot")
+    axes[2].imshow(frameData[:, :, header.index('sigma')].transpose(), origin='lower', cmap='gray')
+    # print("Camera image")
+    cameraImage = frameData[:, :, header.index('camera')]
+    axes[3].imshow(cameraImage.transpose(), origin='lower', cmap='gray')
 
-    # Prepare for plotting
-    pdfPath = os.path.join(outDir, 'fiber-crack.pdf')
-    print("Plotting to {}".format(pdfPath))
-    pdf = PdfPages(pdfPath)
+
+def plot_unmatched_cracks_for_frame(axes, frameData, header):
+    matchedPixels = frameData[..., header.index('matched')]
+    cameraImageData = frameData[..., header.index('camera')]
+
+    axes[0].imshow(matchedPixels.transpose(), origin='lower', cmap='gray')
+    matchedPixelsGauss = frameData[..., header.index('matchedPixelsGauss')]
+
+    axes[1].imshow(matchedPixelsGauss.transpose(), origin='lower', cmap='gray')
+    matchedPixelsGaussThres = frameData[..., header.index('matchedPixelsGaussThres')]
+
+    axes[2].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
+    matchedPixelsGaussThresClean = frameData[..., header.index('matchedPixelsGaussThresClean')]
+
+    axes[3].imshow(matchedPixelsGaussThresClean.transpose().astype(np.float), origin='lower', cmap='gray')
+
+    plot_contour_overlay(axes[4], cameraImageData, matchedPixelsGaussThresClean)
+
+
+def plot_image_cracks_for_frame(axes, frameData, header):
+    cameraImageData = frameData[..., header.index('camera')]
+
+    # Variance-based camera image crack extraction.
+    cameraImageVar = frameData[..., header.index('cameraImageVar')]
+    varianceFiltered = frameData[..., header.index('cameraImageVarFiltered')]
+
+    axes[0].imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
+    plot_contour_overlay(axes[1], cameraImageData, varianceFiltered)
+
+    # Entropy-based camera image crack extraction.
+    cameraImageEntropy = frameData[..., header.index('cameraImageEntropy')]
+    entropyFiltered = frameData[..., header.index('cameraImageEntropyFiltered')]
+
+    axes[2].imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
+    plot_contour_overlay(axes[3], cameraImageData, entropyFiltered)
+
+    # Unmatched pixels + entropy crack extraction.
+    cracksFromUnmatchedAndEntropy = frameData[..., header.index('cracksFromUnmatchedAndEntropy')]
+    plot_contour_overlay(axes[4], cameraImageData, cracksFromUnmatchedAndEntropy)
+
+
+def plot_reference_crack_for_frame(axes, frameData, header):
+
+    binarySigmaFiltered = frameData[..., header.index('sigmaFiltered')]
+    binarySigmaSkeleton = frameData[..., header.index('sigmaSkeleton')]
+    binarySigmaSkeletonPruned = frameData[..., header.index('sigmaSkeletonPruned')]
+
+    axes[0].imshow(binarySigmaFiltered.transpose(), origin='lower', cmap='gray')
+    axes[1].imshow(binarySigmaSkeleton.transpose(), origin='lower', cmap='gray')
+    axes[2].imshow(binarySigmaSkeletonPruned.transpose(), origin='lower', cmap='gray')
+
+
+def plot_feature_histograms_for_frame(axes, frameData, header):
+    cameraImageVar = frameData[..., header.index('cameraImageVar')]
+    cameraImageEntropy = frameData[..., header.index('cameraImageEntropy')]
+
+    # Plot variance and entropy histograms for the image.
+    varianceHist = np.histogram(cameraImageVar, bins=16, range=(0, np.max(cameraImageVar)))[0]
+    entropyHist = np.histogram(cameraImageEntropy, bins=16, range=(0, np.max(cameraImageEntropy)))[0]
+
+    varHistDomain = np.linspace(0, np.max(cameraImageVar), 16)
+    entropyHistDomain = np.linspace(0, np.max(cameraImageEntropy), 16)
+
+    axes[0].bar(varHistDomain * 100, varianceHist)
+    axes[1].bar(entropyHistDomain, entropyHist)
+
+    axes[0].axis('on')
+    axes[1].axis('on')
+    axes[0].get_yaxis().set_visible(False)
+    axes[1].get_yaxis().set_visible(False)
+
+
+def plot_crack_area_chart(dataset):
+    frameMap = dataset.get_frame_map()
+
     fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
-
-    # Draw the color wheel
-    colorWheel = np.empty((h5Data.shape[1], h5Data.shape[2], 2))
-    center = np.array(list(colorWheel.shape[0:2]), dtype=np.int) / 2
-    for x in range(0, colorWheel.shape[0]):
-        for y in range(0, colorWheel.shape[1]):
-            colorWheel[x, y, :] = (-center + [x, y]) / center
-
-    ax.imshow(color_map_hsv(colorWheel[..., 0], colorWheel[..., 1], 2.0).swapaxes(0, 1))
-    fig.suptitle("Color Wheel")
-    pdf.savefig(fig)
-    plt.cla()
-
-    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
-
-    # Prepare a figure with subfigures.
-    fig = plt.figure()
-    axes = []
-    for f in range(0, 20):
-        axes.append(fig.add_subplot(4, 5, f + 1))
-        axes[f].axis('off')
-
-    fig.subplots_adjust(hspace=0.025, wspace=0.025)
-
-    # Draw the frame plots.
-    for f in range(0, dataset.get_frame_number()):
-        timeStart = time.time()
-        frameIndex = frameMap[f]
-        print("Plotting frame {}".format(frameIndex))
-        fig.suptitle("Frame {}".format(frameIndex))
-
-        frameData = h5Data[f, :, :, :]
-        frameWidth = frameData.shape[0]
-        frameHeight = frameData.shape[1]
-
-        matchedPixels = h5Data[f, :, :, header.index('matched')]
-        cameraImageData = h5Data[f, :, :, header.index('camera')]
-
-        assert isinstance(matchedPixels, np.ndarray)
-        assert isinstance(cameraImageData, np.ndarray)
-
-        # print("W-plot")
-        if 'W' in header:
-            imageData0 = frameData[:, :, header.index('W')]
-            axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
-
-        axes[1].imshow(color_map_hsv(frameData[..., header.index('u')],
-                                     frameData[..., header.index('v')], maxNorm=50.0)
-                       .swapaxes(0, 1), origin='lower')
-
-        # print("Sigma-plot")
-        axes[2].imshow(frameData[:, :, header.index('sigma')].transpose(), origin='lower', cmap='gray')
-
-        # print("Camera image")
-        cameraImage = frameData[:, :, header.index('camera')]
-        axes[3].imshow(cameraImage.transpose(), origin='lower', cmap='gray')
-
-        axes[5].imshow(matchedPixels.transpose(), origin='lower', cmap='gray')
-
-        # print("Matched pixels, mean convolution.")
-        matchedPixelsGauss = frameData[..., header.index('matchedPixelsGauss')]
-        axes[6].imshow(matchedPixelsGauss.transpose(), origin='lower', cmap='gray')
-
-        matchedPixelsGaussThres = frameData[..., header.index('matchedPixelsGaussThres')]
-        axes[7].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
-
-        matchedPixelsGaussThresClean = frameData[..., header.index('matchedPixelsGaussThresClean')]
-
-        axes[8].imshow(matchedPixelsGaussThresClean.transpose().astype(np.float), origin='lower', cmap='gray')
-        plot_contour(axes[9], cameraImageData, matchedPixelsGaussThresClean)
-
-        # Variance-based camera image crack extraction.
-        cameraImageVar = frameData[..., header.index('cameraImageVar')]
-        varianceFiltered = frameData[..., header.index('cameraImageVarFiltered')]
-
-        axes[10].imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
-        plot_contour(axes[11], cameraImageData, varianceFiltered)
-
-        # Entropy-based camera image crack extraction.
-        cameraImageEntropy = frameData[..., header.index('cameraImageEntropy')]
-        entropyFiltered = frameData[..., header.index('cameraImageEntropyFiltered')]
-
-        axes[12].imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
-        plot_contour(axes[13], cameraImageData, entropyFiltered)
-
-        # Unmatched pixels + entropy crack extraction.
-        cracksFromUnmatchedAndEntropy = frameData[..., header.index('cracksFromUnmatchedAndEntropy')]
-        plot_contour(axes[14], cameraImageData, cracksFromUnmatchedAndEntropy)
-
-        # Plot variance and entropy histograms for the image.
-        varianceHist = np.histogram(cameraImageVar, bins=16, range=(0, np.max(cameraImageVar)))[0]
-        entropyHist = np.histogram(cameraImageEntropy, bins=16, range=(0, np.max(cameraImageEntropy)))[0]
-
-        varHistDomain = np.linspace(0, np.max(cameraImageVar), 16)
-        axes[18].bar(varHistDomain * 100, varianceHist)
-        axes[19].bar(np.linspace(0, np.max(cameraImageEntropy), 16), entropyHist)
-
-        axes[18].axis('on')
-        axes[19].axis('on')
-        axes[18].get_yaxis().set_visible(False)
-        axes[19].get_yaxis().set_visible(False)
-
-        ### Extract 1-pixel crack paths from the sigma plot through skeletonization (thinning).
-
-        # Get the original sigma plot, with untrackable pixels as 'ones' (cracks).
-        binarySigma = frameData[..., header.index('sigma')] < 0
-
-        frameSize = frameData.shape[0:2]
-        binarySigmaFiltered = binarySigma.copy()
-        maxObjectSize = int(frameWidth * frameHeight / 1000)
-
-        dicRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
-
-        # Erode the cracks to remove smaller noise.
-        selem = scipy.ndimage.morphology.generate_binary_structure(binarySigma.ndim, 2)
-        for i in range(0, math.ceil(dicRadius / 2)):
-            binarySigmaFiltered = skimage.morphology.binary_erosion(binarySigmaFiltered, selem)
-
-        # Remove tiny disconnected chunks of cracks as unnecessary noise.
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore')
-            binarySigmaFiltered = skimage.morphology.remove_small_objects(binarySigmaFiltered, maxObjectSize)
-
-        axes[15].imshow(binarySigmaFiltered.transpose(), origin='lower', cmap='gray')
-
-        # Compute the skeleton.
-        binarySigmaSkeleton = skimage.morphology.skeletonize(binarySigmaFiltered)
-
-        axes[16].imshow(binarySigmaSkeleton.transpose(), origin='lower', cmap='gray')
-
-        # Prune the skeleton from small branches.
-        binarySigmaSkeletonPruned = morphology_prune(binarySigmaSkeleton, int(frameSize[0] / 100))
-
-        axes[17].imshow(binarySigmaSkeletonPruned.transpose(), origin='lower', cmap='gray')
-
-        pdf.savefig(fig, bbox_inches='tight', dpi=300)
-        for a in axes:
-            a.clear()
-
-            a.axis('off')
-
-        print("Rendered in {:.2f} s.".format(time.time() - timeStart))
-
-    # Crack area figure.
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
     fig.suptitle("Crack area in the current frame")
+    ax = fig.add_subplot(1, 1, 1)
+
+    ax.grid(which='both')
+    ax.set_ylabel('Millimeter^2')
+
+    # Plot the estimated crack area.
     ax.plot(dataset.get_metadata_column('crackAreaVariancePhysical'), label='Variance estimation')
     ax.plot(dataset.get_metadata_column('crackAreaEntropyPhysical'), label='Entropy  estimation')
     ax.plot(dataset.get_metadata_column('crackAreaUnmatchedAndEntropyPhysical'), label='Unmatched&Entropy  estimation')
 
-    ax.grid(which='both')
-    ax.set_ylabel('Millimeter^2')
-    plt.legend()
-
-    # A hacky way to convert x axis from frame indices to frame numbers.
+    # A hacky way to convert x axis labels from frame indices to frame numbers.
     locs, labels = plt.xticks()
     for i in range(len(labels)):
         frameIndex = int(locs[i])
@@ -1166,6 +1152,7 @@ def plot_data(dataset):
         # Convert frame numbers into frame indices, i.e. align with X axis.
         def get_closest_frame_index(frameNumber):
             return np.count_nonzero(np.array(frameMap, dtype=np.int)[:-1] < frameNumber)
+
         groundTruth = np.genfromtxt(os.path.join(basePath, crackAreaGroundTruthPath), delimiter=',')
         groundTruth[:, 0] = [get_closest_frame_index(frameNumber) for frameNumber in groundTruth[:, 0]]
 
@@ -1185,21 +1172,75 @@ def plot_data(dataset):
         ax2.scatter(groundTruth[:, 0], percentageError, marker='o', s=8, c='green', label='Percentage error (entropy)')
         ax2.set_ylim(bottom=0)
         ax2.set_ylabel('Error, %')
-        plt.legend()
 
-    pdf.savefig(fig, bbox_inches='tight', dpi=300)
+    plt.legend()
 
-    # Print the data-to-camera mapping.
+    return fig
+
+
+def plot_data_mapping(dataset):
+
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
+
     mappingText = 'Data to camera image mapping\n'
     mappingText += 'Data size: {} Image size: {}\n'.format(
-        list(h5Data.shape[1:3]), dataset.get_attr('cameraImageSize'))
+        list(dataset.get_frame_size()), dataset.get_attr('cameraImageSize'))
     mappingText += 'Physical size: {}\n'.format(dataset.get_attr('physicalFrameSize'))
-    mappingText += 'Min: {} Max: {} Step: {}\n'.format(mappingMin, mappingMax, mappingStep)
+    mappingText += 'Min: {} Max: {} Step: {}\n'.format(*dataset.get_data_image_mapping())
 
     ax.text(0.1, 0.1, mappingText)
 
+    return fig
+
+
+def plot_data(dataset):
+    h5Data, header, frameMap, *r = dataset.unpack_vars()
+
+    # Prepare for plotting
+    pdfPath = os.path.join(outDir, 'fiber-crack.pdf')
+    print("Plotting to {}".format(pdfPath))
+    pdf = PdfPages(pdfPath)
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+
+    # Prepare a figure with subfigures.
+    fig = plt.figure()
+    axes = []
+    for f in range(0, 20):
+        axes.append(fig.add_subplot(4, 5, f + 1))
+        axes[f].axis('off')
+
+    fig.subplots_adjust(hspace=0.025, wspace=0.025)
+
+    # Draw the frame plots.
+    for f in range(0, dataset.get_frame_number()):
+        timeStart = time.time()
+        frameIndex = frameMap[f]
+        print("Plotting frame {}".format(frameIndex))
+        fig.suptitle("Frame {}".format(frameIndex))
+
+        frameData = h5Data[f, :, :, :]
+
+        plot_original_data_for_frame(axes[0:5], frameData, header)
+        plot_unmatched_cracks_for_frame(axes[5:10], frameData, header)
+        plot_image_cracks_for_frame(axes[10:15], frameData, header)
+        plot_reference_crack_for_frame(axes[15:18], frameData, header)
+        plot_feature_histograms_for_frame(axes[18:20], frameData, header)
+
+        pdf.savefig(fig, bbox_inches='tight', dpi=300)
+        for a in axes:
+            a.clear()
+            a.axis('off')
+
+        print("Rendered in {:.2f} s.".format(time.time() - timeStart))
+
+    # Crack area figure.
+    fig = plot_crack_area_chart(dataset)
+    pdf.savefig(fig, bbox_inches='tight', dpi=300)
+
+    # Print the data-to-camera mapping.
+    fig = plot_data_mapping(dataset)
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
 
     pdf.close()
@@ -1214,16 +1255,21 @@ def export_crack_volume(dataset: 'Dataset'):
     """
     frameSize = dataset.get_frame_size()
 
-    frameNumber = dataset.get_frame_number()
+    framesToSkip = globalParams['exportedVolumeSkippedFrames']
+    frameWidth = globalParams['exportedVolumeTimestepWidth']
+    frameNumber = dataset.get_frame_number() - framesToSkip
     # The volume should be exported in Z,Y,X C-order.
-    volume = np.empty((frameNumber, frameSize[1], frameSize[0]), dtype=np.uint8)
+    volume = np.empty((frameNumber * frameWidth, frameSize[1], frameSize[0]), dtype=np.uint8)
 
     for f in range(0, frameNumber):
         crackArea = dataset.get_column_at_frame(f, 'cracksFromUnmatchedAndEntropy')
         crackAreaUint8 = np.zeros_like(crackArea, dtype=np.uint8)
         crackAreaUint8[crackArea == 1.0] = 255
 
-        volume[f, ...] = crackAreaUint8.transpose()
+        volumeSlabSelector = slice_along_axis(slice(f * frameWidth, f * frameWidth + frameWidth), 0, volume.ndim)
+        volume[volumeSlabSelector] = crackAreaUint8.transpose()
+
+    volume = scipy.ndimage.filters.gaussian_filter(volume, 0.5)
 
     write_volume_to_datraw(volume, os.path.join(outDir, 'crack-volume.raw'))
 
