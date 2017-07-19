@@ -10,10 +10,11 @@ import skimage.morphology
 import skimage.transform
 import skimage.util
 
+from FiberCrack.Dataset import Dataset
 
 __all__ = ['plot_original_data_for_frame', 'plot_unmatched_cracks_for_frame',
            'plot_image_cracks_for_frame', 'plot_reference_crack_for_frame',
-           'plot_feature_histograms_for_frame',
+           'plot_feature_histograms_for_frame', 'plot_optic_flow_for_frame'
            'plot_crack_area_chart', 'plot_data_mapping']
 
 
@@ -43,14 +44,23 @@ def color_map_hsv(X, Y, maxNorm):
 
     return result
 
+
 def plot_contour_overlay(axes, backgroundImage, binaryImage):
+    """
+    Plots contours over an image background.
+    :param axes:
+    :param backgroundImage:
+    :param binaryImage:
+    :return:
+    """
     axes.imshow(backgroundImage.transpose(), origin='lower', cmap='gray')
     entropyContours = skimage.measure.find_contours(binaryImage.transpose(), 0.5)
+    lineWidth = axes.get_window_extent().width / 500
     for n, contour in enumerate(entropyContours):
-        axes.plot(contour[:, 1], contour[:, 0], linewidth=1, color='white')
+        axes.plot(contour[:, 1], contour[:, 0], linewidth=lineWidth, color='white')
 
 
-def plot_original_data_for_frame(axes, frameData, header):
+def plot_original_data_for_frame(axes, frameData: np.ndarray, header):
     """
     Plots raw data for a given frame.
     :param axes:
@@ -70,40 +80,42 @@ def plot_original_data_for_frame(axes, frameData, header):
     cameraImage = frameData[:, :, header.index('camera')]
     axes[3].imshow(cameraImage.transpose(), origin='lower', cmap='gray')
 
+    return ['W', 'optic-flow', 'sigma', 'camera-image']
 
-def plot_unmatched_cracks_for_frame(axes, frameData, header):
+
+def plot_unmatched_cracks_for_frame(axes, frameData: np.ndarray, header):
     """
     Plots cracks detected from unmatched pixels, i.e. pixels
     that haven't been 'matched to', for a given frame.
     :param axes:
     :param frameData:
     :param header:
-    :return:
+    :return: plot labels
     """
     matchedPixels = frameData[..., header.index('matched')]
     cameraImageData = frameData[..., header.index('camera')]
 
     axes[0].imshow(matchedPixels.transpose(), origin='lower', cmap='gray')
-    matchedPixelsGauss = frameData[..., header.index('matchedPixelsGauss')]
 
-    axes[1].imshow(matchedPixelsGauss.transpose(), origin='lower', cmap='gray')
     matchedPixelsGaussThres = frameData[..., header.index('matchedPixelsGaussThres')]
+    axes[1].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
 
-    axes[2].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
-    matchedPixelsGaussThresClean = frameData[..., header.index('matchedPixelsGaussThresClean')]
+    matchedPixelsCrack = frameData[..., header.index('matchedPixelsCrack')]
+    axes[2].imshow(matchedPixelsCrack.transpose().astype(np.float), origin='lower', cmap='gray')
 
-    axes[3].imshow(matchedPixelsGaussThresClean.transpose().astype(np.float), origin='lower', cmap='gray')
+    plot_contour_overlay(axes[3], cameraImageData, matchedPixelsCrack)
 
-    plot_contour_overlay(axes[4], cameraImageData, matchedPixelsGaussThresClean)
+    return ['matched-pixels', 'matched-pixels-gauss-thres',
+            'matched-pixels-filtered', 'matched-pixels-crack']
 
 
-def plot_image_cracks_for_frame(axes, frameData, header):
+def plot_image_cracks_for_frame(axes, frameData: np.ndarray, header):
     """
     Plot crack detected with image-based texture-feature techniques.
     :param axes:
     :param frameData:
     :param header:
-    :return:
+    :return: plot names
     """
     cameraImageData = frameData[..., header.index('camera')]
 
@@ -125,8 +137,12 @@ def plot_image_cracks_for_frame(axes, frameData, header):
     cracksFromUnmatchedAndEntropy = frameData[..., header.index('cracksFromUnmatchedAndEntropy')]
     plot_contour_overlay(axes[4], cameraImageData, cracksFromUnmatchedAndEntropy)
 
+    return ['image-variance', 'image-variance-crack',
+            'image-entropy', 'image-entropy-crack',
+            'matched-pixels-entropy-crack']
 
-def plot_reference_crack_for_frame(axes, frameData, header):
+
+def plot_reference_crack_for_frame(axes, frameData: np.ndarray, header):
     """
     Plots the crack path in the reference frame.
     :param axes:
@@ -141,6 +157,8 @@ def plot_reference_crack_for_frame(axes, frameData, header):
     axes[0].imshow(binarySigmaFiltered.transpose(), origin='lower', cmap='gray')
     axes[1].imshow(binarySigmaSkeleton.transpose(), origin='lower', cmap='gray')
     axes[2].imshow(binarySigmaSkeletonPruned.transpose(), origin='lower', cmap='gray')
+
+    return ['sigma-filtered', 'sigma-skeleton', 'sigma-crack']
 
 
 def plot_feature_histograms_for_frame(axes, frameData, header):
@@ -163,10 +181,11 @@ def plot_feature_histograms_for_frame(axes, frameData, header):
     axes[1].get_yaxis().set_visible(False)
 
 
-def plot_crack_area_chart(dataset, crackAreaGroundTruthPath=None):
+def plot_crack_area_chart(dataset: 'Dataset', crackAreaGroundTruthPath=None):
     """
     Plots area of the crack (a scalar) detected by various methods
     against time (or more precisely, frame index).
+    :param crackAreaGroundTruthPath:
     :param dataset:
     :return:
     """
@@ -222,7 +241,7 @@ def plot_crack_area_chart(dataset, crackAreaGroundTruthPath=None):
     return fig
 
 
-def plot_optic_flow(pdf, dataset, frameIndex):
+def plot_optic_flow_for_frame(ax, dataset: 'Dataset', frameIndex):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
     imageShift = dataset.get_image_shift()
     frameSize = dataset.get_frame_size()
@@ -231,8 +250,8 @@ def plot_optic_flow(pdf, dataset, frameIndex):
     imageShift = imageShift[frameIndex]
 
     frameFlow = h5Data[frameIndex, :, :, :][:, :, [header.index('u'), header.index('v')]]
-    frameFlow[:, :, 0] = np.rint((frameFlow[:, :, 0] - imageShift[0]) / step[0])
-    frameFlow[:, :, 1] = np.rint((frameFlow[:, :, 1] - imageShift[1]) / step[1])
+    frameFlow[:, :, 0] = ((frameFlow[:, :, 0] - imageShift[0]) / step[0])
+    frameFlow[:, :, 1] = ((frameFlow[:, :, 1] - imageShift[1]) / step[1])
 
 
     # Shift the array to transform to the current frame coordinates.
@@ -245,16 +264,11 @@ def plot_optic_flow(pdf, dataset, frameIndex):
 
     X, Y = np.meshgrid(np.arange(0, frameSize[0]), np.arange(0, frameSize[1]))
 
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
     ax.quiver(X, Y, plottedFlow[:, :, 0], plottedFlow[:, :, 1], angles='uv', scale_units='xy', scale=1,
               width=0.003, headwidth=2)
-    # pdf.savefig(fig)
-    # plt.cla()
-    plt.show()
 
 
-def plot_data_mapping(dataset):
+def plot_data_mapping(dataset: 'Dataset'):
 
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)

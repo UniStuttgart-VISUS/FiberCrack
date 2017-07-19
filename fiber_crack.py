@@ -14,6 +14,8 @@ import FiberCrack.crack_detection as crack_detection
 import FiberCrack.data_augmentation as data_augmentation
 import FiberCrack.data_loading as data_loading
 import FiberCrack.plotting as plotting
+from FiberCrack.Dataset import Dataset
+
 from PythonExtras.numpy_extras import slice_along_axis
 from PythonExtras.volume_tools import write_volume_to_datraw
 
@@ -42,7 +44,7 @@ globalParams = {
     'textureKernelMultiplier': 1.0,
     'entropyThreshold': 1.0,
     'varianceThreshold': 0.003,
-    'unmatchedPixelsPadding': 0.0,
+    'unmatchedPixelsPadding': 0.1,
     'unmatchedAndEntropyKernelMultiplier': 0.5,
     'exportedVolumeTimestepWidth': 3,
     'exportedVolumeSkippedFrames': 5
@@ -210,6 +212,44 @@ def compute_and_append_results(dataset: 'Dataset'):
     apply_function_if_code_changed(dataset, crack_detection.append_reference_frame_crack)
 
 
+def export_frame_data_to_png(dataset: 'Dataset', frame):
+    frameData = dataset.h5Data[dataset.get_frame_map().index(frame), ...]
+
+    figureNumber = 18
+    figures = [plt.figure(dpi=300) for i in range(figureNumber)]
+    axes = [fig.add_subplot(1, 1, 1) for fig in figures]
+
+    # Plot the data.
+    labels1 = plotting.plot_original_data_for_frame(axes[0:5], frameData, dataset.get_header())
+    labels2 = plotting.plot_unmatched_cracks_for_frame(axes[5:10], frameData, dataset.get_header())
+    labels3 = plotting.plot_image_cracks_for_frame(axes[10:15], frameData, dataset.get_header())
+    labels4 = plotting.plot_reference_crack_for_frame(axes[15:18], frameData, dataset.get_header())
+
+    # Assign the labels to the axes.
+    labels = [''] * figureNumber
+    labels[0:len(labels1)] = labels1
+    labels[5:len(labels2)] = labels2
+    labels[10:len(labels3)] = labels3
+    labels[15:len(labels4)] = labels4
+
+    figuresDir = os.path.join(outDir, 'figures-{}-{}'.format(dataConfig.metadataFilename, frame))
+    if not os.path.exists(figuresDir):
+        os.makedirs(figuresDir)
+
+    for figure, ax, label in zip(figures, axes, labels):
+        # Skip unused axes.
+        if label == '':
+            continue
+
+        # Configure the axes to cover the whole figure and render to an image file.
+        ax.axis('off')
+        ax.set_frame_on(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        plt.axis('off')
+        figure.savefig(os.path.join(figuresDir, label), bbox_inches='tight', pad_inches=0)
+
+
 def plot_data(dataset: 'Dataset'):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
 
@@ -221,7 +261,7 @@ def plot_data(dataset: 'Dataset'):
     ax = fig.add_subplot(1, 1, 1)
 
     # Prepare a figure with subfigures.
-    fig = plt.figure()
+    fig = plt.figure(dpi=300)
     axes = []
     for f in range(0, 20):
         axes.append(fig.add_subplot(4, 5, f + 1))
@@ -262,6 +302,17 @@ def plot_data(dataset: 'Dataset'):
     pdf.close()
 
 
+def plot_optic_flow(dataset: 'Dataset'):
+    frameIndex = dataset.get_frame_map().index(1800)
+
+    figure = plt.figure()
+    ax = figure.add_subplot(1, 1, 1)
+
+    plotting.plot_optic_flow_for_frame(ax, dataset, frameIndex)
+
+    plt.show()
+
+
 def export_crack_volume(dataset: 'Dataset'):
     """
     Build a volume by concatenating crack areas from each frame,
@@ -294,7 +345,9 @@ def main():
 
     # Parse the arguments.
     parser = argparse.ArgumentParser('Fiber crack.')
-    parser.add_argument('-c', '--command', default='plot', choices=['plot', 'export-crack-volume'])
+    parser.add_argument('-c', '--command', default='plot',
+                        choices=['plot', 'export-crack-volume', 'optic-flow', 'export-figures'])
+    parser.add_argument('-f', '--frame', default=None, type=int)
     args = parser.parse_args()
 
     timeStart = time.time()
@@ -316,6 +369,8 @@ def main():
     commandMap = {
         'plot': lambda: plot_data(dataset),
         'export-crack-volume': lambda: export_crack_volume(dataset),
+        'optic-flow': lambda: plot_optic_flow(dataset),
+        'export-figures': lambda: export_frame_data_to_png(dataset, int(args.frame))
     }
     commandMap[args.command]()
     print("Command executed in {:.3f} s.".format(time.time() - timeStart))

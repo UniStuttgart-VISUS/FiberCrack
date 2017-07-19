@@ -10,9 +10,8 @@ import skimage.morphology
 import skimage.transform
 import skimage.util
 
-from FiberCrack.crack_detection import *
+from FiberCrack.Dataset import Dataset
 from FiberCrack.data_loading import DataImportConfig
-from FiberCrack.plotting import *
 
 
 __all__ = ['append_camera_image', 'append_matched_pixels', 'zero_pixels_without_tracking',

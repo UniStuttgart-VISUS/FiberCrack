@@ -34,9 +34,9 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
     header = dataset.get_header()
 
     # Prepare columns for the results.
-    index1 = dataset.create_or_get_column('matchedPixelsGauss')
-    index2 = dataset.create_or_get_column('matchedPixelsGaussThres')
-    index3 = dataset.create_or_get_column('matchedPixelsGaussThresClean')
+    index1 = dataset.create_or_get_column('matchedPixelsGaussThres')
+    index2 = dataset.create_or_get_column('matchedPixelsGaussThresClean')
+    index3 = dataset.create_or_get_column('matchedPixelsCrack')
 
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
     for frameIndex in range(0, dataset.get_frame_number()):
@@ -75,17 +75,19 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
             tempResult = skimage.morphology.binary_dilation(tempResult, selem)
             tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
 
+            matchedPixelsGaussThresClean = tempResult.copy()
+
             # Don't erode back: instead, compensate for the kernel used during DIC.
             currentDilation = 2  # Because we dilated twice without eroding back.
             for i in range(currentDilation, dicKernelRadius + 1):
                 tempResult = skimage.morphology.binary_dilation(tempResult, selem)
 
-            matchedPixelsGaussThresClean = tempResult
+            matchedPixelsCrack = tempResult
 
         # Write the results.
-        dataset.h5Data[frameIndex, :, :, index1] = matchedPixelsGauss
-        dataset.h5Data[frameIndex, :, :, index2] = matchedPixelsGaussThres
-        dataset.h5Data[frameIndex, :, :, index3] = matchedPixelsGaussThresClean
+        dataset.h5Data[frameIndex, :, :, index1] = matchedPixelsGaussThres
+        dataset.h5Data[frameIndex, :, :, index2] = matchedPixelsGaussThresClean
+        dataset.h5Data[frameIndex, :, :, index3] = matchedPixelsCrack
 
 
 def append_crack_from_variance(dataset: 'Dataset', textureKernelSize, varianceThreshold=0.003):

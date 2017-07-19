@@ -1,6 +1,10 @@
 import h5py
 import numpy as np
 
+
+__all__ = ['Dataset']
+
+
 class Dataset:
 
     @staticmethod
