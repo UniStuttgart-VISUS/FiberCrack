@@ -14,6 +14,7 @@ from FiberCrack.Dataset import Dataset
 
 __all__ = ['plot_original_data_for_frame', 'plot_unmatched_cracks_for_frame',
            'plot_image_cracks_for_frame', 'plot_reference_crack_for_frame',
+           'plot_crack_prediction_for_frame',
            'plot_feature_histograms_for_frame', 'plot_optic_flow_for_frame'
            'plot_crack_area_chart', 'plot_data_mapping']
 
@@ -140,6 +141,19 @@ def plot_image_cracks_for_frame(axes, frameData: np.ndarray, header):
     return ['image-variance', 'image-variance-crack',
             'image-entropy', 'image-entropy-crack',
             'matched-pixels-entropy-crack']
+
+
+def plot_crack_prediction_for_frame(axes, frameData: np.ndarray, header):
+    #todo doc
+
+    cameraImageData = frameData[..., header.index('camera')]
+
+    prediction = frameData[..., header.index('crackPrediction')]
+
+    axes[0].imshow(prediction.transpose(), origin='lower', cmap='gray')
+    plot_contour_overlay(axes[1], cameraImageData, prediction)
+
+    return ['crack-prediction', 'crack-prediction-overlay']
 
 
 def plot_reference_crack_for_frame(axes, frameData: np.ndarray, header):

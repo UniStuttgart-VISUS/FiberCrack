@@ -3,6 +3,7 @@ import hashlib
 import inspect
 import os
 import time
+from typing import Callable, List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +12,7 @@ import scipy.stats
 from matplotlib.backends.backend_pdf import PdfPages
 
 import FiberCrack.crack_detection as crack_detection
+import FiberCrack.crack_prediction as crack_prediction
 import FiberCrack.data_augmentation as data_augmentation
 import FiberCrack.data_loading as data_loading
 import FiberCrack.plotting as plotting
@@ -47,6 +49,7 @@ globalParams = {
     'unmatchedPixelsPadding': 0.1,
     'unmatchedAndEntropyKernelMultiplier': 0.5,
     'exportedVolumeTimestepWidth': 3,
+    'exportedVolumeGradientWidth': 3,
     'exportedVolumeSkippedFrames': 5
 }
 
@@ -211,6 +214,9 @@ def compute_and_append_results(dataset: 'Dataset'):
     apply_function_if_code_changed(dataset, crack_detection.append_crack_from_unmatched_and_entropy)
     apply_function_if_code_changed(dataset, crack_detection.append_reference_frame_crack)
 
+    #todo
+    crack_prediction.append_crack_prediction(dataset)
+
 
 def export_frame_data_to_png(dataset: 'Dataset', frame):
     frameData = dataset.h5Data[dataset.get_frame_map().index(frame), ...]
@@ -250,15 +256,13 @@ def export_frame_data_to_png(dataset: 'Dataset', frame):
         figure.savefig(os.path.join(figuresDir, label), bbox_inches='tight', pad_inches=0)
 
 
-def plot_data(dataset: 'Dataset'):
+def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarray, List[str]], None]):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
 
     # Prepare for plotting
     pdfPath = os.path.join(outDir, 'fiber-crack.pdf')
     print("Plotting to {}".format(pdfPath))
     pdf = PdfPages(pdfPath)
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
 
     # Prepare a figure with subfigures.
     fig = plt.figure(dpi=300)
@@ -278,11 +282,8 @@ def plot_data(dataset: 'Dataset'):
 
         frameData = h5Data[f, :, :, :]
 
-        plotting.plot_original_data_for_frame(axes[0:5], frameData, header)
-        plotting.plot_unmatched_cracks_for_frame(axes[5:10], frameData, header)
-        plotting.plot_image_cracks_for_frame(axes[10:15], frameData, header)
-        plotting.plot_reference_crack_for_frame(axes[15:18], frameData, header)
-        plotting.plot_feature_histograms_for_frame(axes[18:20], frameData, header)
+        # The actual plotting is done by the provided function.
+        plotFrameFunction(axes, frameData, header)
 
         pdf.savefig(fig, bbox_inches='tight', dpi=300)
         for a in axes:
@@ -300,6 +301,20 @@ def plot_data(dataset: 'Dataset'):
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
 
     pdf.close()
+
+
+def plot_crack_extraction_view(axes, frameData, header):
+    plotting.plot_original_data_for_frame(axes[0:5], frameData, header)
+    plotting.plot_unmatched_cracks_for_frame(axes[5:10], frameData, header)
+    plotting.plot_image_cracks_for_frame(axes[10:15], frameData, header)
+    plotting.plot_reference_crack_for_frame(axes[15:18], frameData, header)
+    plotting.plot_feature_histograms_for_frame(axes[18:20], frameData, header)
+    # plotting.plot_crack_prediction_for_frame(axes[18:20], frameData, header)
+
+
+def plot_crack_prediction_view(axes, frameData, header):
+    plotting.plot_image_cracks_for_frame(axes[0:5], frameData, header)
+    plotting.plot_crack_prediction_for_frame(axes[5:10], frameData, header)
 
 
 def plot_optic_flow(dataset: 'Dataset'):
@@ -336,7 +351,8 @@ def export_crack_volume(dataset: 'Dataset'):
         volumeSlabSelector = slice_along_axis(slice(f * frameWidth, f * frameWidth + frameWidth), 0, volume.ndim)
         volume[volumeSlabSelector] = crackAreaUint8.transpose()
 
-    volume = scipy.ndimage.filters.gaussian_filter(volume, 0.5)
+    # volumeGrad = np.linalg.norm(np.asarray(np.gradient(volume)), axis=0).astype(np.uint8)
+    # volume = scipy.ndimage.filters.gaussian_filter(volumeGrad, 1.0)
 
     write_volume_to_datraw(volume, os.path.join(outDir, 'crack-volume.raw'))
 
@@ -346,7 +362,7 @@ def main():
     # Parse the arguments.
     parser = argparse.ArgumentParser('Fiber crack.')
     parser.add_argument('-c', '--command', default='plot',
-                        choices=['plot', 'export-crack-volume', 'optic-flow', 'export-figures'])
+                        choices=['plot', 'export-crack-volume', 'optic-flow', 'export-figures', 'plot-prediction'])
     parser.add_argument('-f', '--frame', default=None, type=int)
     args = parser.parse_args()
 
@@ -367,10 +383,11 @@ def main():
     timeStart = time.time()
     print("Executing command: {}".format(args.command))
     commandMap = {
-        'plot': lambda: plot_data(dataset),
+        'plot': lambda: plot_to_pdf(dataset, plot_crack_extraction_view),
         'export-crack-volume': lambda: export_crack_volume(dataset),
         'optic-flow': lambda: plot_optic_flow(dataset),
-        'export-figures': lambda: export_frame_data_to_png(dataset, int(args.frame))
+        'export-figures': lambda: export_frame_data_to_png(dataset, int(args.frame)),
+        'plot-prediction': lambda: plot_to_pdf(dataset, plot_crack_prediction_view)
     }
     commandMap[args.command]()
     print("Command executed in {:.3f} s.".format(time.time() - timeStart))
