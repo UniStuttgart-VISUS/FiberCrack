@@ -144,11 +144,17 @@ def plot_image_cracks_for_frame(axes, frameData: np.ndarray, header):
 
 
 def plot_crack_prediction_for_frame(axes, frameData: np.ndarray, header):
-    #todo doc
+    """
+    Plot crack area predicted with machine learning techniques.
+    :param axes:
+    :param frameData:
+    :param header:
+    :return:
+    """
 
     cameraImageData = frameData[..., header.index('camera')]
 
-    prediction = frameData[..., header.index('crackPrediction')]
+    prediction = frameData[..., header.index('crackPredictionSpatial')]
 
     axes[0].imshow(prediction.transpose(), origin='lower', cmap='gray')
     plot_contour_overlay(axes[1], cameraImageData, prediction)

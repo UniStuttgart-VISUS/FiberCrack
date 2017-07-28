@@ -10,7 +10,7 @@ import skimage.transform
 import skimage.util
 
 
-__all__ = ['image_morphology_prune', 'image_variance_filter', 'image_entropy_filter']
+__all__ = ['image_filter', 'image_morphology_prune', 'image_variance_filter', 'image_entropy_filter']
 
 
 def image_morphology_prune(data, iter):
@@ -46,6 +46,25 @@ def image_morphology_prune(data, iter):
             output = np.logical_xor(output, removedPixels)
 
     return output
+
+
+def image_filter(name: str, data, windowRadius):
+    """
+    Apply an image filter specified by a string.
+    :param name:
+    :param data:
+    :param windowRadius:
+    :return:
+    """
+    filterMap = {
+        'variance': image_variance_filter,
+        'entropy': image_entropy_filter
+    }
+
+    if name not in filterMap:
+        raise RuntimeError("Unknown image filter '{}'".format(name))
+
+    return filterMap[name](data, windowRadius)
 
 
 def image_variance_filter(data, windowRadius):

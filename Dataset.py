@@ -17,7 +17,7 @@ class Dataset:
         # of the data in advance.
 
         augmentedFeatureNumber = 4
-        resultsFeatureNumber = 15  # Approximately, leave some empty.
+        resultsFeatureNumber = 30  # Approximately, leave some empty.
 
         return augmentedFeatureNumber + resultsFeatureNumber
 
@@ -104,6 +104,9 @@ class Dataset:
 
     def get_attr(self, attrName):
         return self.h5Data.attrs[attrName]
+
+    def get_all_attrs(self):
+        return {name: self.h5Data.attrs[name] for name in self.h5Data.attrs}
 
     def has_attr(self, attrName):
         return attrName in self.h5Data.attrs

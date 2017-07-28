@@ -18,6 +18,8 @@ import FiberCrack.data_loading as data_loading
 import FiberCrack.plotting as plotting
 from FiberCrack.Dataset import Dataset
 
+import FiberCrack.image_processing as image_processing
+
 from PythonExtras.numpy_extras import slice_along_axis
 from PythonExtras.volume_tools import write_volume_to_datraw
 
@@ -50,7 +52,10 @@ globalParams = {
     'unmatchedAndEntropyKernelMultiplier': 0.5,
     'exportedVolumeTimestepWidth': 3,
     'exportedVolumeGradientWidth': 3,
-    'exportedVolumeSkippedFrames': 5
+    'exportedVolumeSkippedFrames': 5,
+
+    'allTextureKernelMultipliers': [2.0, 1.5, 1.0, 0.5, 0.25],
+    'textureFilters': ['entropy', 'variance']
 }
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
@@ -158,7 +163,7 @@ def augment_data(dataset: 'Dataset'):
     return dataset
 
 
-def apply_function_if_code_changed(dataset: 'Dataset', function):
+def apply_function_if_code_changed(dataset: 'Dataset', function: Callable[..., None]):
     """
     Calls a function that computes and writes data to the dataset.
     Stores the hash of the function's source code as metadata.
@@ -203,8 +208,12 @@ def compute_and_append_results(dataset: 'Dataset'):
     # Compute derived parameters.
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
     dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+    textureKernelMultipliers = globalParams['allTextureKernelMultipliers']
     globalParams['dicKernelRadius'] = dicKernelRadius
     globalParams['textureKernelSize'] = int(dicKernelRadius * globalParams['textureKernelMultiplier'])
+    globalParams['allTextureKernelSizes'] = [int(dicKernelRadius * mult) for mult in textureKernelMultipliers]
+
+    apply_function_if_code_changed(dataset, data_augmentation.append_texture_features)
 
     apply_function_if_code_changed(dataset, crack_detection.append_crack_from_unmatched_pixels)
 
@@ -214,8 +223,8 @@ def compute_and_append_results(dataset: 'Dataset'):
     apply_function_if_code_changed(dataset, crack_detection.append_crack_from_unmatched_and_entropy)
     apply_function_if_code_changed(dataset, crack_detection.append_reference_frame_crack)
 
-    #todo
-    crack_prediction.append_crack_prediction(dataset)
+    # crack_prediction.append_crack_prediction(dataset)
+    apply_function_if_code_changed(dataset, crack_prediction.append_crack_prediction_spatial)
 
 
 def export_frame_data_to_png(dataset: 'Dataset', frame):
@@ -370,6 +379,7 @@ def main():
     print("Loading the data.")
     dataset = load_data()
     print("Data loaded in {:.3f} s. Shape: {} Columns: {}".format(time.time() - timeStart, dataset.h5Data.shape, dataset.get_header()))
+    print("Data attributes: {}".format(dataset.get_all_attrs()))
 
     timeStart = time.time()
     print("Augmenting the data.")

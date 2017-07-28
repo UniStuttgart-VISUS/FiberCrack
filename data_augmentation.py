@@ -1,5 +1,6 @@
 import os
 import os.path as path
+from typing import Dict, Callable, List
 
 from PIL import Image
 import numpy as np
@@ -12,10 +13,12 @@ import skimage.util
 
 from FiberCrack.Dataset import Dataset
 from FiberCrack.data_loading import DataImportConfig
+import FiberCrack.image_processing as image_processing
 
 
 __all__ = ['append_camera_image', 'append_matched_pixels', 'zero_pixels_without_tracking',
-           'append_data_image_mapping', 'append_physical_frame_size', 'compute_avg_flow']
+           'append_data_image_mapping', 'append_physical_frame_size', 'compute_avg_flow',
+           'append_texture_features']
 
 
 def append_camera_image(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
@@ -203,4 +206,25 @@ def compute_avg_flow(dataset: 'Dataset'):
             [0, 0])
 
     return avgFlow
+
+
+def append_texture_features(dataset: 'Dataset', allTextureKernelSizes,
+                            textureFilters: List[str]):
+    """
+    Compute and append various texture features with various kernel sizes.
+    :param dataset:
+    :param allTextureKernelSizes:
+    :param textureFilters:
+    :return:
+    """
+    for f in range(dataset.get_frame_number()):
+        frameImage = dataset.get_column_at_frame(f, 'camera')
+
+        for kernelSize in allTextureKernelSizes:
+            for filterName in textureFilters:
+                result = image_processing.image_filter(filterName, frameImage, kernelSize)
+                featureName = 'cameraImage{}-{}'.format(filterName.capitalize(), kernelSize)
+                featureIndex = dataset.create_or_get_column(featureName)
+
+                dataset.h5Data[f, ..., featureIndex] = result
 
