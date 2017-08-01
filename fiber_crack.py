@@ -13,6 +13,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 import FiberCrack.crack_detection as crack_detection
 import FiberCrack.crack_prediction as crack_prediction
+import FiberCrack.crack_metrics as crack_metrics
 import FiberCrack.data_augmentation as data_augmentation
 import FiberCrack.data_loading as data_loading
 import FiberCrack.plotting as plotting
@@ -160,6 +161,9 @@ def augment_data(dataset: 'Dataset'):
     print("Adding the matched pixels...")
     data_augmentation.append_matched_pixels(dataset, dataConfig)
 
+    print("Adding crack area ground truth...")
+    data_augmentation.append_crack_area_ground_truth(dataset, dataConfig)
+
     print("Zeroing the pixels that lost tracking.")
     data_augmentation.zero_pixels_without_tracking(dataset)
 
@@ -226,8 +230,11 @@ def compute_and_append_results(dataset: 'Dataset'):
     apply_function_if_code_changed(dataset, crack_detection.append_crack_from_unmatched_and_entropy)
     apply_function_if_code_changed(dataset, crack_detection.append_reference_frame_crack)
 
-    # crack_prediction.append_crack_prediction(dataset)
+    apply_function_if_code_changed(dataset, crack_prediction.append_crack_prediction_simple)
     apply_function_if_code_changed(dataset, crack_prediction.append_crack_prediction_spatial)
+
+    # todo this runs always, because there are too many dependencies.
+    crack_metrics.append_estimated_crack_area(dataset)
 
 
 def export_frame_data_to_png(dataset: 'Dataset', frame):
@@ -305,7 +312,7 @@ def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarra
         print("Rendered in {:.2f} s.".format(time.time() - timeStart))
 
     # Crack area figure.
-    fig = plotting.plot_crack_area_chart(dataset, os.path.join(dataConfig.basePath, dataConfig.crackAreaGroundTruthPath))
+    fig = plotting.plot_crack_area_chart(dataset)
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
 
     # Print the data-to-camera mapping.

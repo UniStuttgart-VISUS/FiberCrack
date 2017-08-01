@@ -27,6 +27,7 @@ class Dataset:
         self.h5FrameMap = h5File['frameMap']
         self.h5Metadata = h5File['metadata']
         self.h5Metaheader = h5File['metaheader']
+        self.h5ArrayAttributes = h5File['arrayAttributes']
 
     def unpack_vars(self):
         header = self.get_header()
@@ -102,14 +103,52 @@ class Dataset:
     def set_attr(self, attrName, attrValue):
         self.h5Data.attrs[attrName] = attrValue
 
+    def set_str_array_attr(self, attrName, array):
+        """
+        Pack a small string array into a string attribute.
+        More convenient than creating separate hdf5 arrays.
+        :param attrName:
+        :param array:
+        :return:
+        """
+        self.set_attr(attrName, '#!$'.join(array))
+
+    def set_numpy_array_attr(self, attrName, array):
+        """
+        Store an Numpy array as an 'attribute'.
+        The array is actually stored as a separate hdf5 dataset.
+
+        :param attrName:
+        :param array:
+        :return:
+        """
+        if attrName in self.h5ArrayAttributes:
+            storage = self.h5ArrayAttributes[attrName]
+            if storage.shape != array.shape:
+                del self.h5ArrayAttributes[attrName]
+                self.h5ArrayAttributes.create_dataset(attrName, data=array)
+            else:
+                storage[...] = array
+        else:
+            self.h5ArrayAttributes.create_dataset(attrName, data=array)
+
     def get_attr(self, attrName):
         return self.h5Data.attrs[attrName]
+
+    def get_str_array_attr(self, attrName):
+        return self.get_attr(attrName).split('#!$')
+
+    def get_numpy_array_attr(self, attrName):
+        return self.h5ArrayAttributes[attrName][...]
 
     def get_all_attrs(self):
         return {name: self.h5Data.attrs[name] for name in self.h5Data.attrs}
 
     def has_attr(self, attrName):
         return attrName in self.h5Data.attrs
+
+    def has_numpy_array_attr(self, attrName):
+        return attrName in self.h5ArrayAttributes
 
     def get_header(self):
         return self.h5Header[:].astype(np.str).tolist()

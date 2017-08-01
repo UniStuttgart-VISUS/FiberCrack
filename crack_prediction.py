@@ -11,20 +11,27 @@ from PythonExtras.Normalizer import Normalizer
 from PythonExtras.numpy_extras import NumpyDynArray, extract_patches
 
 
-__all__ = ['append_crack_prediction_spatial', 'append_crack_prediction']
+__all__ = ['append_crack_prediction_spatial', 'append_crack_prediction_simple']
 
 
 def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
-                            textureFilters: List[str]):
+                                    textureFilters: List[str]):
+    """
+    Make a crack prediction based on many texture features, using a local neighborhood around a pixel.
+    Unmatched with entropy detector is used as ground truth.
+
+    Note: some config parameters are imported just to create a dependency.
+
+    :param dataset:
+    :param allTextureKernelSizes:
+    :param textureFilters:
+    :return:
+    """
 
     frameNumber = dataset.get_frame_number()
     header = dataset.get_header()
 
-    # We do not store which features are texture features, so we need to reconstruct the names ourselves.
-    textureFeatureNames = []
-    for kernelSize in allTextureKernelSizes:
-        for featureName in textureFilters:
-            textureFeatureNames.append('cameraImage{}-{}'.format(featureName.capitalize(), kernelSize))
+    textureFeatureNames = dataset.get_str_array_attr('textureFeatureNames')
 
     targetFeature = 'cracksFromUnmatchedAndEntropy'  # What we're going to predict.
     featureNames = textureFeatureNames + ['camera', targetFeature]
@@ -109,7 +116,7 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
         dataset.h5Data[f, min[0]:max[0]+1, min[1]:max[1]+1, outputIndex2] = prediction[...] > 0.5
 
 
-def append_crack_prediction(dataset: 'Dataset'):
+def append_crack_prediction_simple(dataset: 'Dataset'):
 
     frameNumber = dataset.get_frame_number()
     frameSize = dataset.get_frame_size()
@@ -117,8 +124,6 @@ def append_crack_prediction(dataset: 'Dataset'):
     featureNames = ['cameraImageEntropy', 'cameraImageVar', 'camera']
     featureIndices = [header.index(name) for name in featureNames]
     featureNumber = len(featureNames)
-
-    patchSize = (1, 1)
 
     # Collect training data.
 
@@ -141,6 +146,10 @@ def append_crack_prediction(dataset: 'Dataset'):
 
     dataX = rawDataX.get_all()
     dataY = rawDataY.get_all()
+
+    # Don't use all the data for now. !!!!!!!!!!
+    dataX = dataX[::10, ...]
+    dataY = dataY[::10, ...]
 
     # Train a model.
 

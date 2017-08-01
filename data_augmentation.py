@@ -18,7 +18,7 @@ import FiberCrack.image_processing as image_processing
 
 __all__ = ['append_camera_image', 'append_ground_truth_image', 'append_matched_pixels',
            'zero_pixels_without_tracking', 'append_data_image_mapping', 'append_physical_frame_size',
-           'append_texture_features', 'compute_avg_flow']
+           'append_texture_features', 'append_crack_area_ground_truth', 'compute_avg_flow']
 
 
 def append_grayscale_images(dataset: 'Dataset', imagePathGetter: Callable[[int], str], columnName: str, metacolumnName: str):
@@ -260,6 +260,8 @@ def append_texture_features(dataset: 'Dataset', allTextureKernelSizes,
     :param textureFilters:
     :return:
     """
+    allFeatureNames = set()
+
     for f in range(dataset.get_frame_number()):
         frameImage = dataset.get_column_at_frame(f, 'camera')
 
@@ -270,4 +272,32 @@ def append_texture_features(dataset: 'Dataset', allTextureKernelSizes,
                 featureIndex = dataset.create_or_get_column(featureName)
 
                 dataset.h5Data[f, ..., featureIndex] = result
+                allFeatureNames.add(featureName)
 
+    # Store the generated feature names for easier access.
+    dataset.set_str_array_attr('textureFeatureNames', list(allFeatureNames))
+
+
+def append_crack_area_ground_truth(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
+    """
+    Load crack area (scalar) ground truth from CSV files, if available.
+
+    :param dataset:
+    :param dataConfig:
+    :return:
+    """
+
+    frameMap = dataset.get_frame_map()
+
+    if not dataConfig.crackAreaGroundTruthPath:
+        return
+
+    # Convert frame numbers into frame indices, i.e. align with X axis.
+    def get_closest_frame_index(frameNumber):
+        return np.count_nonzero(np.array(frameMap, dtype=np.int)[:-1] < frameNumber)
+
+    path = os.path.join(dataConfig.basePath, dataConfig.crackAreaGroundTruthPath)
+    groundTruth = np.genfromtxt(path, delimiter=',')
+    groundTruth[:, 0] = [get_closest_frame_index(frameNumber) for frameNumber in groundTruth[:, 0]]
+
+    dataset.set_numpy_array_attr('crackAreaGroundTruth', groundTruth)

@@ -82,7 +82,7 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
             for i in range(currentDilation, dicKernelRadius + 1):
                 tempResult = skimage.morphology.binary_dilation(tempResult, selem)
 
-            matchedPixelsCrack = tempResult
+            matchedPixelsCrack = tempResult == 0.0
 
         # Write the results.
         dataset.h5Data[frameIndex, :, :, index1] = matchedPixelsGaussThres
@@ -102,7 +102,6 @@ def append_crack_from_variance(dataset: 'Dataset', textureKernelSize, varianceTh
     """
     print("Computing cracks from variance.")
 
-    frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
 
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
@@ -110,7 +109,6 @@ def append_crack_from_variance(dataset: 'Dataset', textureKernelSize, varianceTh
     index1 = dataset.create_or_get_column('cameraImageVar')
     index2 = dataset.create_or_get_column('cameraImageVarFiltered')
 
-    crackAreaData = np.zeros((dataset.get_frame_number()))
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, ...]
         cameraImage = frameData[..., header.index('camera')]
@@ -126,20 +124,8 @@ def append_crack_from_variance(dataset: 'Dataset', textureKernelSize, varianceTh
         for i in range(0, math.ceil(textureKernelSize / 2.0)):
             varianceFiltered = skimage.morphology.binary_dilation(varianceFiltered, selem)
 
-        # Determine the crack area.
-        if dataset.get_metadata_val(frameIndex, 'hasCameraImage'):
-            totalArea = np.count_nonzero(varianceFiltered)
-            crackAreaData[frameIndex] = totalArea
-
         dataset.h5Data[frameIndex, ..., index1] = cameraImageVar
         dataset.h5Data[frameIndex, ..., index2] = varianceFiltered
-
-    frameArea = frameWidth * frameHeight
-    physicalFrameSize = dataset.get_attr('physicalFrameSize')
-    physicalFrameArea = physicalFrameSize[0] * physicalFrameSize[1]
-
-    dataset.create_or_update_metadata_column('crackAreaVariance', crackAreaData)
-    dataset.create_or_update_metadata_column('crackAreaVariancePhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
 def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThreshold=1.0):
@@ -156,7 +142,6 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
     # refactor, if more features are added.
     print("Computing cracks from entropy.")
 
-    frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
 
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
@@ -164,7 +149,6 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
     index1 = dataset.create_or_get_column('cameraImageEntropy')
     index2 = dataset.create_or_get_column('cameraImageEntropyFiltered')
 
-    crackAreaData = np.zeros((dataset.get_frame_number()))
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, ...]
         cameraImage = frameData[..., header.index('camera')]
@@ -180,20 +164,8 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
         for i in range(0, math.ceil(textureKernelSize / 2.0)):
             entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
 
-        # Determine the crack area.
-        if dataset.get_metadata_val(frameIndex, 'hasCameraImage'):
-            totalArea = np.count_nonzero(entropyFiltered)
-            crackAreaData[frameIndex] = totalArea
-
         dataset.h5Data[frameIndex, ..., index1] = cameraImageEntropy
         dataset.h5Data[frameIndex, ..., index2] = entropyFiltered
-
-    frameArea = frameWidth * frameHeight
-    physicalFrameSize = dataset.get_attr('physicalFrameSize')
-    physicalFrameArea = physicalFrameSize[0] * physicalFrameSize[1]
-
-    dataset.create_or_update_metadata_column('crackAreaEntropy', crackAreaData)
-    dataset.create_or_update_metadata_column('crackAreaEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
 def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSize, unmatchedAndEntropyKernelMultiplier,
@@ -222,7 +194,6 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
 
     index = dataset.create_or_get_column('cracksFromUnmatchedAndEntropy')
 
-    crackAreaData = np.zeros((dataset.get_frame_number()))
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, :, :, :]
         # Fetch the unmatched pixels.
@@ -250,19 +221,7 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
         # Crack = low entropy near unmatched pixels.
         cracks = np.logical_and(unmathedPixels, entropyFiltered)
 
-        # Determine the crack area.
-        if dataset.get_metadata_val(frameIndex, 'hasCameraImage'):
-            totalArea = np.count_nonzero(cracks)
-            crackAreaData[frameIndex] = totalArea
-
         dataset.h5Data[frameIndex, ..., index] = cracks
-
-    frameArea = frameWidth * frameHeight
-    physicalFrameSize = dataset.get_attr('physicalFrameSize')
-    physicalFrameArea = physicalFrameSize[0] * physicalFrameSize[1]
-
-    dataset.create_or_update_metadata_column('crackAreaUnmatchedAndEntropy', crackAreaData)
-    dataset.create_or_update_metadata_column('crackAreaUnmatchedAndEntropyPhysical', crackAreaData / frameArea * physicalFrameArea)
 
 
 def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius):

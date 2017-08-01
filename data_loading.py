@@ -136,6 +136,7 @@ def load_csv_data(config: 'DataImportConfig'):
         h5File.create_dataset('metaheader', data=np.array(metaheader, dtype='|S128'), maxshape=(None,))
         h5File.create_dataset('header', data=np.array(header, dtype='|S128'), maxshape=(None,))
         h5File.create_dataset('frameMap', data=frameMap)
+        h5File.create_group('arrayAttributes')
 
     else:
         print("Reading preloaded data from {}".format(preloadedDataPath))
@@ -247,6 +248,7 @@ def load_tiff_data(config: 'DataImportConfig'):
         h5File.create_dataset('metaheader', data=np.array(metaheader, dtype='|S20'), maxshape=(None,))
         h5File.create_dataset('header', data=np.array(header, dtype='|S20'), maxshape=(None,))
         h5File.create_dataset('frameMap', data=frameMap)
+        h5File.create_group('arrayAttributes')
 
     else:
         print("Reading preloaded data from {}".format(preloadedDataPath))
