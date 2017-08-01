@@ -27,6 +27,7 @@ class DataImportConfig:
                  basePath=None,
                  dataDir=None,
                  imageDir=None,
+                 groundTruthDir=None,
                  metadataFilename=None,
                  dataFormat=None,
                  imageBaseName=None,
@@ -38,6 +39,7 @@ class DataImportConfig:
                  maxFrames=sys.maxsize,
                  ):
 
+        self.groundTruthDir = groundTruthDir  # Path to binary images with true crack shape.
         self.basePath = basePath
         self.dataDir = dataDir
         self.imageDir = imageDir
@@ -47,7 +49,7 @@ class DataImportConfig:
         self.imageFilenameFormat = imageFilenameFormat
         self.preloadedDataDir = preloadedDataDir
         self.preloadedDataFilename = preloadedDataFilename
-        self.crackAreaGroundTruthPath = crackAreaGroundTruthPath
+        self.crackAreaGroundTruthPath = crackAreaGroundTruthPath  # Path to a CSV file with true measured crack area.
         self.reloadOriginalData = reloadOriginalData
         self.maxFrames = maxFrames
 

@@ -16,18 +16,20 @@ from FiberCrack.data_loading import DataImportConfig
 import FiberCrack.image_processing as image_processing
 
 
-__all__ = ['append_camera_image', 'append_matched_pixels', 'zero_pixels_without_tracking',
-           'append_data_image_mapping', 'append_physical_frame_size', 'compute_avg_flow',
-           'append_texture_features']
+__all__ = ['append_camera_image', 'append_ground_truth_image', 'append_matched_pixels',
+           'zero_pixels_without_tracking', 'append_data_image_mapping', 'append_physical_frame_size',
+           'append_texture_features', 'compute_avg_flow']
 
 
-def append_camera_image(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
+def append_grayscale_images(dataset: 'Dataset', imagePathGetter: Callable[[int], str], columnName: str, metacolumnName: str):
     """
-    Appends a column containing grayscale data from the camera.
-    The data is cropped from the frame according to the mapping between the data and the image.
+    Append an image for each frame (if exists).
+    A generic method used for camera images and images derived from them.
 
-    :param dataConfig:
     :param dataset:
+    :param imagePathGetter:
+    :param columnName:
+    :param metacolumnName:
     :return:
     """
 
@@ -38,16 +40,18 @@ def append_camera_image(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
 
     hasCameraImageMask = np.zeros((h5Data.shape[0]))
 
-    columnIndex = dataset.create_or_get_column('camera')
+    columnIndex = dataset.create_or_get_column(columnName)
     frameNumber = h5Data.shape[0]
     for f in range(0, frameNumber):
-        print("Frame {}/{}".format(f, frameNumber))
         frameIndex = frameMap[f]
-        cameraImagePath = path.join(dataConfig.basePath, dataConfig.imageDir,
-                                    dataConfig.imageFilenameFormat.format(dataConfig.imageBaseName, frameIndex))
+        cameraImagePath = imagePathGetter(frameIndex)
         cameraImageAvailable = os.path.isfile(cameraImagePath)
         if cameraImageAvailable:
+            print("Frame {}/{}".format(f, frameNumber))
+
             cameraImage = np.array(skimage.util.img_as_float(Image.open(cameraImagePath)))
+            if cameraImage.ndim == 3:  # If multichannel image.
+                cameraImage = cameraImage[..., 0]  # Use only the first channel.
 
             # Crop a rectangle from the camera image, accounting for the overall shift of the specimen.
             relMin = np.clip(min + imageShift[f, ...], [0, 0], cameraImage.shape)
@@ -60,7 +64,46 @@ def append_camera_image(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
             dataset.set_attr('cameraImageSize', cameraImage.shape)
             hasCameraImageMask[f] = True
 
-    dataset.create_or_update_metadata_column('hasCameraImage', hasCameraImageMask)
+    dataset.create_or_update_metadata_column(metacolumnName, hasCameraImageMask)
+
+    return dataset
+
+
+def append_camera_image(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
+    """
+    Appends a column containing grayscale data from the camera.
+    The data is cropped from the frame according to the mapping between the data and the image.
+
+    :param dataConfig:
+    :param dataset:
+    :return:
+    """
+
+    imagePathGetter = lambda frame: os.path.join(dataConfig.basePath, dataConfig.imageDir,
+                                                 dataConfig.imageFilenameFormat.format(dataConfig.imageBaseName, frame))
+    append_grayscale_images(dataset, imagePathGetter, 'camera', 'hasCameraImage')
+
+    return dataset
+
+
+def append_ground_truth_image(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
+    """
+    Appends a column containing binary image of the crack area.
+    The data is cropped from the frame according to the mapping between the data and the image.
+
+    :param dataConfig:
+    :param dataset:
+    :return:
+    """
+
+    if dataConfig.groundTruthDir is None:
+        return dataset
+
+    def image_path_getter(frame):
+        return os.path.join(dataConfig.basePath, dataConfig.groundTruthDir,
+                            dataConfig.imageFilenameFormat.format(dataConfig.imageBaseName, frame))
+
+    append_grayscale_images(dataset, image_path_getter, 'crackGroundTruth', 'hasCrackGroundTruth')
 
     return dataset
 

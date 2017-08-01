@@ -85,6 +85,7 @@ dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
 dataConfig.dataDir = 'data_export'
 # dataConfig.dataDir = 'data_export_fine'
 dataConfig.imageDir = 'raw_images'
+dataConfig.groundTruthDir = 'ground_truth'
 dataConfig.imageBaseName = 'Spec048'
 dataConfig.dicKernelSize = 81
 dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
@@ -152,8 +153,10 @@ def augment_data(dataset: 'Dataset'):
     dataset.create_or_update_metadata_column('imageShiftX', imageShift[..., 0])
     dataset.create_or_update_metadata_column('imageShiftY', imageShift[..., 1])
 
-    print("Adding the camera image...")
+    print("Adding the camera images...")
     data_augmentation.append_camera_image(dataset, dataConfig)
+    print("Adding the crack ground truth images...")
+    data_augmentation.append_ground_truth_image(dataset, dataConfig)
     print("Adding the matched pixels...")
     data_augmentation.append_matched_pixels(dataset, dataConfig)
 
