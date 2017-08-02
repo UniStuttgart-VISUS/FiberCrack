@@ -33,7 +33,7 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
 
     textureFeatureNames = dataset.get_str_array_attr('textureFeatureNames')
 
-    targetFeature = 'cracksFromUnmatchedAndEntropy'  # What we're going to predict.
+    targetFeature = 'crackGroundTruth'  # What we're going to predict.
     featureNames = textureFeatureNames + ['camera', targetFeature]
     featureIndices = [header.index(name) for name in featureNames]
 
@@ -50,7 +50,13 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
     rawDataX = NumpyDynArray((-1, featureNumberFlat))
     rawDataY = NumpyDynArray((-1, 1))
 
+    # frameMask = np.ones((dataset.get_frame_number), dtype=np.bool)
+    frameMask = dataset.get_metadata_column('hasCrackGroundTruth')
+
     for f in range(frameNumber):
+        if not frameMask[f]:
+            continue
+
         # Fetch all relevant data for this frame.
         features = dataset.h5Data[f, ...][..., featureIndices]
         patches, *r = extract_patches(features, [0, 1], patchSize)
@@ -70,8 +76,8 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
     dataY = rawDataY.get_all()
 
     # Don't use all the data for now. !!!!!!!!!!
-    dataX = dataX[::10, ...]
-    dataY = dataY[::10, ...]
+    # dataX = dataX[::10, ...]
+    # dataY = dataY[::10, ...]
 
     print("Training...")
 

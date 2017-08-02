@@ -266,13 +266,15 @@ def plot_crack_area_chart(dataset: 'Dataset'):
         # Plot the percentage error on the second Y-axis.
         ax2 = ax.twinx()
 
-        crackAreaFeaturesForPercentage = ['crackAreaUnmatchedAndEntropyPhysical',
-                                          'crackAreaPredictionSpatialPhysical']
-        featuresShort = ['unmatchedAndEntropy', 'predictionSpatial']
+        crackAreaFeaturesForPercentage = ['crackAreaUnmatchedAndEntropy',
+                                          'crackAreaPredictionSpatial']
 
         # Compute and plot crack area percentage error for each frame with ground truth available.
-        for i, featureName in enumerate(crackAreaFeaturesForPercentage):
-            crackArea = dataset.get_metadata_column(featureName)
+        for i, featureName in enumerate(crackAreaFeatures):
+            if featureName not in crackAreaFeaturesForPercentage:
+                continue
+
+            crackArea = dataset.get_metadata_column(featureName + 'Physical')
 
             percentageError = np.zeros(groundTruth.shape[0])
             for j, frameIndex in enumerate(groundTruth[:, 0]):
@@ -286,7 +288,7 @@ def plot_crack_area_chart(dataset: 'Dataset'):
 
             print(percentageError)
             ax2.scatter(groundTruth[:, 0], percentageError, marker='o', s=8,
-                        label=featuresShort[i] + ' (%)')
+                        label=crackAreaFeaturesShort[i] + ' (%)')
 
         ax2.set_ylabel('Error, %')
         ax2.set_ylim(bottom=0)

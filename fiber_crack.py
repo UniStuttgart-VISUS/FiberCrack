@@ -81,7 +81,7 @@ globalParams = {
 # imageBaseName = 'Spec010'
 # dicKernelSize = 55
 
-dataConfig.basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/PTFE-Epoxy'
+dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/PTFE-Epoxy'
 dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
 dataConfig.dataDir = 'data_export'
 # dataConfig.dataDir = 'data_export_fine'
