@@ -365,7 +365,7 @@ def export_crack_volume(dataset: 'Dataset'):
     for f in range(0, frameNumber):
         crackArea = dataset.get_column_at_frame(f, 'cracksFromUnmatchedAndEntropy')
         crackAreaUint8 = np.zeros_like(crackArea, dtype=np.uint8)
-        crackAreaUint8[crackArea == 1.0] = 255
+        crackAreaUint8[crackArea == 1.0] = 10 + 245 * (f / float(frameNumber))
 
         volumeSlabSelector = slice_along_axis(slice(f * frameWidth, f * frameWidth + frameWidth), 0, volume.ndim)
         volume[volumeSlabSelector] = crackAreaUint8.transpose()
@@ -373,7 +373,7 @@ def export_crack_volume(dataset: 'Dataset'):
     # volumeGrad = np.linalg.norm(np.asarray(np.gradient(volume)), axis=0).astype(np.uint8)
     # volume = scipy.ndimage.filters.gaussian_filter(volumeGrad, 1.0)
 
-    write_volume_to_datraw(volume, os.path.join(outDir, 'crack-volume.raw'))
+    write_volume_to_datraw(np.flip(volume, 0), os.path.join(outDir, 'crack-volume.raw'))
 
 
 def main():
