@@ -300,4 +300,8 @@ def append_crack_area_ground_truth(dataset: 'Dataset', dataConfig: 'DataImportCo
     groundTruth = np.genfromtxt(path, delimiter=',')
     groundTruth[:, 0] = [get_closest_frame_index(frameNumber) for frameNumber in groundTruth[:, 0]]
 
+    # For now generate fake STD values. todo get proper data.
+    errors = groundTruth[:, 1] * np.random.uniform(0.01, 0.15, groundTruth.shape[0])
+    groundTruth = np.concatenate((groundTruth, errors[:, np.newaxis]), axis=1)
+
     dataset.set_numpy_array_attr('crackAreaGroundTruth', groundTruth)

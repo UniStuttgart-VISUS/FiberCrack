@@ -50,6 +50,7 @@ globalParams = {
     'entropyThreshold': 1.0,
     'varianceThreshold': 0.003,
     'unmatchedPixelsPadding': 0.1,
+    'sigmaSkeletonPadding': 0.1,
     'unmatchedAndEntropyKernelMultiplier': 0.5,
     'exportedVolumeTimestepWidth': 3,
     'exportedVolumeGradientWidth': 3,
@@ -237,42 +238,65 @@ def compute_and_append_results(dataset: 'Dataset'):
     crack_metrics.append_estimated_crack_area(dataset)
 
 
-def export_frame_data_to_png(dataset: 'Dataset', frame):
-    frameData = dataset.h5Data[dataset.get_frame_map().index(frame), ...]
+def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
 
     figureNumber = 18
     figures = [plt.figure(dpi=300) for i in range(figureNumber)]
     axes = [fig.add_subplot(1, 1, 1) for fig in figures]
 
-    # Plot the data.
-    labels1 = plotting.plot_original_data_for_frame(axes[0:5], frameData, dataset.get_header())
-    labels2 = plotting.plot_unmatched_cracks_for_frame(axes[5:10], frameData, dataset.get_header())
-    labels3 = plotting.plot_image_cracks_for_frame(axes[10:15], frameData, dataset.get_header())
-    labels4 = plotting.plot_reference_crack_for_frame(axes[15:18], frameData, dataset.get_header())
+    for frame in range(dataset.get_frame_number()):
 
-    # Assign the labels to the axes.
-    labels = [''] * figureNumber
-    labels[0:len(labels1)] = labels1
-    labels[5:len(labels2)] = labels2
-    labels[10:len(labels3)] = labels3
-    labels[15:len(labels4)] = labels4
-
-    figuresDir = os.path.join(outDir, 'figures-{}-{}'.format(dataConfig.metadataFilename, frame))
-    if not os.path.exists(figuresDir):
-        os.makedirs(figuresDir)
-
-    for figure, ax, label in zip(figures, axes, labels):
-        # Skip unused axes.
-        if label == '':
+        # If the target frame is specified, skip the other frames.
+        if targetFrame is not None and dataset.get_frame_map()[frame] != targetFrame:
             continue
 
-        # Configure the axes to cover the whole figure and render to an image file.
-        ax.axis('off')
-        ax.set_frame_on(False)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        plt.axis('off')
-        figure.savefig(os.path.join(figuresDir, label), bbox_inches='tight', pad_inches=0)
+        frameData = dataset.h5Data[frame, ...]
+        frameLabel = dataset.get_frame_map()[frame]
+
+        # Plot the data.
+        labels1 = plotting.plot_original_data_for_frame(axes[0:5], frameData, dataset.get_header())
+        labels2 = plotting.plot_unmatched_cracks_for_frame(axes[5:10], frameData, dataset.get_header())
+        labels3 = plotting.plot_image_cracks_for_frame(axes[10:15], frameData, dataset.get_header())
+        labels4 = plotting.plot_reference_crack_for_frame(axes[15:18], frameData, dataset.get_header())
+
+        # Assign the labels to the axes.
+        labels = [''] * figureNumber
+        labels[0:len(labels1)] = labels1
+        labels[5:len(labels2)] = labels2
+        labels[10:len(labels3)] = labels3
+        labels[15:len(labels4)] = labels4
+
+        figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
+        if not os.path.exists(figuresDir):
+            os.makedirs(figuresDir)
+
+        for figure, ax, label in zip(figures, axes, labels):
+            # Skip unused axes.
+            if label == '':
+                continue
+
+            # Configure the axes to cover the whole figure and render to an image file.
+            ax.axis('off')
+            ax.set_frame_on(False)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            plt.axis('off')
+            figure.savefig(os.path.join(figuresDir, '{}-{}'.format(frameLabel, label)), bbox_inches='tight', pad_inches=0)
+
+        for ax in axes:
+            ax.clear()
+
+
+def plot_crack_area_figures(dataset: 'Dataset'):
+    fig = plotting.plot_crack_area_chart(dataset)
+
+    figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
+    fig.savefig(os.path.join(figuresDir, 'crack-area'))
+
+
+def plot_figures(dataset: 'Dataset', frame=None):
+    plot_frame_data_figures(dataset, frame)
+    plot_crack_area_figures(dataset)
 
 
 def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarray, List[str]], None]):
@@ -313,6 +337,7 @@ def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarra
 
     # Crack area figure.
     fig = plotting.plot_crack_area_chart(dataset)
+    fig.suptitle('Crack area in the current frame')
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
 
     # Print the data-to-camera mapping.
@@ -402,11 +427,12 @@ def main():
 
     timeStart = time.time()
     print("Executing command: {}".format(args.command))
+    frame = args.frame if 'frame' in args.__dict__ else None
     commandMap = {
         'plot': lambda: plot_to_pdf(dataset, plot_crack_extraction_view),
         'export-crack-volume': lambda: export_crack_volume(dataset),
         'optic-flow': lambda: plot_optic_flow(dataset),
-        'export-figures': lambda: export_frame_data_to_png(dataset, int(args.frame)),
+        'export-figures': lambda: plot_figures(dataset, frame),
         'plot-prediction': lambda: plot_to_pdf(dataset, plot_crack_prediction_view)
     }
     commandMap[args.command]()

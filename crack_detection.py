@@ -224,7 +224,7 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
         dataset.h5Data[frameIndex, ..., index] = cracks
 
 
-def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius):
+def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius, sigmaSkeletonPadding=0.1):
     """
     Compute the crack path in the reference frame based on sigma,
     i.e. based on which pixels have lost tracking and can no longer be found
@@ -244,6 +244,11 @@ def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius):
 
         # Get the original sigma plot, with untrackable pixels as 'ones' (cracks).
         binarySigma = dataset.get_column_at_frame(frameIndex, 'sigma') < 0
+
+        if sigmaSkeletonPadding > 0:
+            paddingHeight = int(frameSize[1] * sigmaSkeletonPadding)
+            binarySigma[:, :paddingHeight] = False
+            binarySigma[:, -paddingHeight:] = False
 
         binarySigmaFiltered = binarySigma.copy()
         maxObjectSize = int(frameSize[0] * frameSize[1] / 1000)
