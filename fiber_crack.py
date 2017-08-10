@@ -6,6 +6,7 @@ import time
 from typing import Callable, List
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import numpy as np
 import scipy.ndimage.morphology
 import scipy.stats
@@ -384,21 +385,37 @@ def export_crack_volume(dataset: 'Dataset'):
     framesToSkip = globalParams['exportedVolumeSkippedFrames']
     frameWidth = globalParams['exportedVolumeTimestepWidth']
     frameNumber = dataset.get_frame_number() - framesToSkip
-    # The volume should be exported in Z,Y,X C-order.
-    volume = np.empty((frameNumber * frameWidth, frameSize[1], frameSize[0]), dtype=np.uint8)
+    # The volume should be exported in Z,Y,X,C with C-order.
+    volume = np.empty((frameNumber * frameWidth, frameSize[1], frameSize[0], 4), dtype=np.uint8)
+
+    crackAreaMeasured = dataset.get_metadata_column('crackAreaUnmatchedAndEntropy')
+    firstNonEmptyFrame = next(i for i, area in enumerate(crackAreaMeasured.tolist()) if area > 0)
+
+    colorMap = plt.get_cmap('viridis')
+    frameMap = dataset.get_frame_map()
 
     for f in range(0, frameNumber):
         crackArea = dataset.get_column_at_frame(f, 'cracksFromUnmatchedAndEntropy')
-        crackAreaUint8 = np.zeros_like(crackArea, dtype=np.uint8)
-        crackAreaUint8[crackArea == 1.0] = 10 + 245 * (f / float(frameNumber))
+        crackAreaUint8 = np.zeros(crackArea.shape[0:2] + (4,), dtype=np.uint8)
+
+        # Avoid mapping empty frames to colors, so that we use the full color map.
+        t = (f - firstNonEmptyFrame) / (frameNumber - firstNonEmptyFrame)
+
+        crackAreaUint8[crackArea == 1.0] = np.asarray(colorMap(t)) * 255
 
         volumeSlabSelector = slice_along_axis(slice(f * frameWidth, f * frameWidth + frameWidth), 0, volume.ndim)
-        volume[volumeSlabSelector] = crackAreaUint8.transpose()
-
-    # volumeGrad = np.linalg.norm(np.asarray(np.gradient(volume)), axis=0).astype(np.uint8)
-    # volume = scipy.ndimage.filters.gaussian_filter(volumeGrad, 1.0)
+        volume[volumeSlabSelector] = crackAreaUint8.swapaxes(0, 1)
 
     write_volume_to_datraw(np.flip(volume, 0), os.path.join(outDir, 'crack-volume.raw'))
+
+    # Export the color mapping legend.
+    fig = plt.figure(figsize=(4, 1))
+    ax = fig.add_axes([0.05, 0.5, 0.9, 0.25])
+    norm = mpl.colors.Normalize(vmin=frameMap[firstNonEmptyFrame], vmax=frameMap[frameNumber - 1])
+    colorBar = mpl.colorbar.ColorbarBase(ax, cmap=colorMap, norm=norm, orientation='horizontal')
+    colorBar.set_label('Frame')
+
+    fig.savefig(os.path.join(outDir, 'crack-volume-legend.png'))
 
 
 def main():
