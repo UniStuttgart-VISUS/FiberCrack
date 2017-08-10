@@ -233,8 +233,12 @@ def compute_avg_flow(dataset: 'Dataset'):
 
     # Select points which will be sampled to determine the overall shift relative to the ref. frame
     # (This is used to align the camera image with the reference frame (i.e. data space)
-    sampleX = np.linspace(0 + 20, h5Data.shape[1] - 20, 4)
-    sampleY = np.linspace(0 + 20, h5Data.shape[2] - 20, 4)
+    frameSize = dataset.get_frame_size()
+
+    # Sample near the center of the image, where the fiber is.
+    centerX, centerY = (int(frameSize[0] / 2), int(frameSize[1] / 2))
+    sampleX = np.linspace(centerX - 20, centerX + 20, 4)
+    sampleY = np.linspace(centerY - 20, centerY + 20, 4)
     samplePointsX, samplePointsY = np.array(np.meshgrid(sampleX, sampleY)).astype(np.int)
     # Convert to an array of 2d points.
     samplePoints = np.concatenate((samplePointsX[:, :, np.newaxis], samplePointsY[:, :, np.newaxis]), 2).reshape(-1, 2)
