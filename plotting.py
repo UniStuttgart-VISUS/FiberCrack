@@ -2,6 +2,7 @@ import math
 import colorsys
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 import skimage.feature
 import skimage.filters
@@ -214,10 +215,13 @@ def plot_crack_area_chart(dataset: 'Dataset'):
     frameMap = dataset.get_frame_map()
 
     fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1)
+    fig.set_size_inches(4, 3)
+
+    ax = fig.add_axes([0.15, 0.15, 0.7, 0.7])
 
     ax.grid(which='both')
     ax.set_ylabel('$Crack \/ area, mm^2$')
+    ax.set_xlabel('Frame')
 
     # Plot the estimated crack area.
     crackAreaFeatures = dataset.get_str_array_attr('crackAreaNames')
@@ -255,45 +259,43 @@ def plot_crack_area_chart(dataset: 'Dataset'):
             return np.count_nonzero(np.array(frameMap, dtype=np.int)[:-1] < frameNumber)
 
         groundTruth = dataset.get_numpy_array_attr('crackAreaGroundTruth')
+        header = dataset.get_str_array_attr('crackAreaGroundTruthHeader')
 
         # Plot the ground truth.
         # ax.scatter(groundTruth[:, 0], groundTruth[:, 1], marker='x', label='Manually measured')
-        ax.errorbar(groundTruth[:, 0], groundTruth[:, 1], groundTruth[:, 2],
-                    fmt='x', label='Manually measured (FAKE errors)')
+        ax.errorbar(groundTruth[:, header.index('frame')],
+                    groundTruth[:, header.index('average')],
+                    groundTruth[:, header.index('std')] * 3.0,
+                    fmt='x', label='Manual (with std)')
+
+        ax.bar([0], [0], color='g', alpha=0.5, label='Percentage error')  # Empty series, just for legend.
 
         ax.legend(loc=0)
         ax.set_ylim(bottom=0)
 
         # Plot the percentage error on the second Y-axis.
-        # ax2 = ax.twinx()
-        #
-        # crackAreaFeaturesForPercentage = ['crackAreaUnmatchedAndEntropy',
-        #                                   'crackAreaPredictionSpatial']
-        #
-        # # Compute and plot crack area percentage error for each frame with ground truth available.
-        # for i, featureName in enumerate(crackAreaFeatures):
-        #     if featureName not in crackAreaFeaturesForPercentage:
-        #         continue
-        #
-        #     crackArea = dataset.get_metadata_column(featureName + 'Physical')
-        #
-        #     percentageError = np.zeros(groundTruth.shape[0])
-        #     for j, frameIndex in enumerate(groundTruth[:, 0]):
-        #         truth = groundTruth[j, 1]
-        #         if truth == 0:
-        #             percentageError[j] = 0
-        #             continue
-        #
-        #         estimated = crackArea[int(frameIndex)]
-        #         percentageError[j] = math.fabs((truth - estimated) / truth) * 100
-        #
-        #     print(percentageError)
-        #     ax2.scatter(groundTruth[:, 0], percentageError, marker='o', s=8,
-        #                 label=crackAreaFeaturesShort[i] + ' (%)')
-        #
-        # ax2.set_ylabel('Error, %')
-        # ax2.set_ylim(bottom=0)
-        # ax2.legend(loc=3)
+        ax2 = ax.twinx()
+
+        # Compute and plot crack area percentage error for each frame with ground truth available.
+        crackAreaFeatureName = crackAreaFeatures[crackAreaFeaturesShort.index(featuresToPlot[0])]
+        crackArea = dataset.get_metadata_column(crackAreaFeatureName + 'Physical')
+
+        percentageError = np.zeros(groundTruth.shape[0])
+        for j, frameIndex in enumerate(groundTruth[:, 0]):
+            truth = groundTruth[j, 1]
+            if truth == 0:
+                percentageError[j] = 0
+                continue
+
+            estimated = crackArea[int(frameIndex)]
+            percentageError[j] = math.fabs((truth - estimated) / truth) * 100
+
+        print(percentageError)
+        ax2.bar(groundTruth[:, 0], percentageError, color='g', alpha=0.5, zorder=-10)
+        ax2.yaxis.set_major_locator(ticker.MultipleLocator(10))
+
+        ax2.set_ylabel('Error, %')
+        ax2.set_ylim(bottom=0, top=100)
 
     # plt.legend()
 

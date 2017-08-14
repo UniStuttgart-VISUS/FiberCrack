@@ -14,14 +14,17 @@ import skimage.util
 from FiberCrack.Dataset import Dataset
 from FiberCrack.data_loading import DataImportConfig
 import FiberCrack.image_processing as image_processing
-
+from PythonExtras.data_loading import readDataFromCsv
 
 __all__ = ['append_camera_image', 'append_ground_truth_image', 'append_matched_pixels',
            'zero_pixels_without_tracking', 'append_data_image_mapping', 'append_physical_frame_size',
            'append_texture_features', 'append_crack_area_ground_truth', 'compute_avg_flow']
 
 
-def append_grayscale_images(dataset: 'Dataset', imagePathGetter: Callable[[int], str], columnName: str, metacolumnName: str):
+def append_grayscale_images(dataset: 'Dataset',
+                            imagePathGetter: Callable[[int], str],
+                            columnName: str,
+                            metacolumnName: str):
     """
     Append an image for each frame (if exists).
     A generic method used for camera images and images derived from them.
@@ -301,11 +304,25 @@ def append_crack_area_ground_truth(dataset: 'Dataset', dataConfig: 'DataImportCo
         return np.count_nonzero(np.array(frameMap, dtype=np.int)[:-1] < frameNumber)
 
     path = os.path.join(dataConfig.basePath, dataConfig.crackAreaGroundTruthPath)
-    groundTruth = np.genfromtxt(path, delimiter=',')
+    groundTruth, header = readDataFromCsv(path)
     groundTruth[:, 0] = [get_closest_frame_index(frameNumber) for frameNumber in groundTruth[:, 0]]
 
-    # For now generate fake STD values. todo get proper data.
-    errors = groundTruth[:, 1] * np.random.uniform(0.01, 0.15, groundTruth.shape[0])
-    groundTruth = np.concatenate((groundTruth, errors[:, np.newaxis]), axis=1)
+    # Fetch data-camera-phys.size mapping details.
+    physicalSize = dataset.get_attr('physicalFrameSize')
+    physicalArea = physicalSize[0] * physicalSize[1]
+    frameSize = dataset.get_frame_size()
+    
+    frameArea = frameSize[0] * frameSize[1]
+    mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
+    dataPixelArea = mappingStep[0] * mappingStep[1]
+
+    featuresToConvert = ['measurement-{}'.format(i) for i in range(1, 5)] + ['average', 'std']
+
+    for name in featuresToConvert:
+        # Divide by data pixel area -> convert to 'data pixel area'
+        # Divide by data frame area -> convert to percentage of the data frame
+        # Multiply by the physical size -> convert to physical area
+        groundTruth[:, header.index(name)] *= physicalArea / dataPixelArea / frameArea
 
     dataset.set_numpy_array_attr('crackAreaGroundTruth', groundTruth)
+    dataset.set_str_array_attr('crackAreaGroundTruthHeader', header)

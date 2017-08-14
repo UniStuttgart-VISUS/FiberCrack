@@ -292,7 +292,7 @@ def plot_crack_area_figures(dataset: 'Dataset'):
     fig = plotting.plot_crack_area_chart(dataset)
 
     figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
-    fig.savefig(os.path.join(figuresDir, 'crack-area'))
+    fig.savefig(os.path.join(figuresDir, 'crack-area'), dpi=300)
 
 
 def plot_figures(dataset: 'Dataset', frame=None):
