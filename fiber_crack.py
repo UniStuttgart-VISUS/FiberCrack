@@ -83,15 +83,26 @@ globalParams = {
 # imageBaseName = 'Spec010'
 # dicKernelSize = 55
 
-dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/PTFE-Epoxy'
-dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
-dataConfig.dataDir = 'data_export'
+# The cleanest dataset: PTFE with epoxy.
+# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/PTFE-Epoxy'
+# dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
+# dataConfig.dataDir = 'data_export'
+# # dataConfig.dataDir = 'data_export_fine'
+# dataConfig.imageDir = 'raw_images'
+# dataConfig.groundTruthDir = 'ground_truth'
+# dataConfig.imageBaseName = 'Spec048'
+# dataConfig.dicKernelSize = 81
+# dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
+
+# Older, different experiments.
+dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/20151125-Spec012'
+dataConfig.metadataFilename = '20152411-Spec012.csv'
+dataConfig.dataDir = 'export'
 # dataConfig.dataDir = 'data_export_fine'
-dataConfig.imageDir = 'raw_images'
-dataConfig.groundTruthDir = 'ground_truth'
-dataConfig.imageBaseName = 'Spec048'
+dataConfig.imageDir = ''
+dataConfig.imageBaseName = '20152411-Spec012'
 dataConfig.dicKernelSize = 81
-dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
+# dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 # # PTFE-Epoxy with fine spatial and temporal resolutions, mid-experiment.
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Spec48'

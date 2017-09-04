@@ -31,9 +31,17 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
     frameNumber = dataset.get_frame_number()
     header = dataset.get_header()
 
+    outputIndex1 = dataset.create_or_get_column('crackPredictionSpatial')
+    outputIndex2 = dataset.create_or_get_column('crackPredictionSpatialBinary')
+
     textureFeatureNames = dataset.get_str_array_attr('textureFeatureNames')
 
     targetFeature = 'crackGroundTruth'  # What we're going to predict.
+
+    if targetFeature not in header:
+        print("Target feature '{}' is not available, skipping prediction.".format(targetFeature))
+        return
+
     featureNames = textureFeatureNames + ['camera', targetFeature]
     featureIndices = [header.index(name) for name in featureNames]
 
@@ -96,9 +104,6 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
     history = model.fit(trainX, trainY, validation_data=(testX, testY), nb_epoch=2, batch_size=128)
 
     print("Predicting")
-
-    outputIndex1 = dataset.create_or_get_column('crackPredictionSpatial')
-    outputIndex2 = dataset.create_or_get_column('crackPredictionSpatialBinary')
 
     for f in range(0, frameNumber):
         print("Predicting crack for frame {}".format(f))

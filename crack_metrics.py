@@ -44,9 +44,10 @@ def append_estimated_crack_area(dataset: 'Dataset'):
 
         # Compute area in each frame.
         crackAreaData = np.zeros((frameNumber))
-        for f in range(0, frameNumber):
-            crack = dataset.get_column_at_frame(f, featureName)
-            crackAreaData[f] = np.count_nonzero(crack)
+        if featureName in dataset.get_header():  # Skip, if feature is not there.
+            for f in range(0, frameNumber):
+                crack = dataset.get_column_at_frame(f, featureName)
+                crackAreaData[f] = np.count_nonzero(crack)
 
         # Output.
         fullAreaFeatureName = 'crackArea' + upper_first(areaFeatureName)

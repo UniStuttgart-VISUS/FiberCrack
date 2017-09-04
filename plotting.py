@@ -81,8 +81,9 @@ def plot_original_data_for_frame(axes, frameData: np.ndarray, header):
     # print("Camera image")
     cameraImage = frameData[:, :, header.index('camera')]
     axes[3].imshow(cameraImage.transpose(), origin='lower', cmap='gray')
-    crackGroundTruth = frameData[:, :, header.index('crackGroundTruth')]
-    plot_contour_overlay(axes[4], cameraImage, crackGroundTruth)
+    if 'crackGroundTruth' in header:
+        crackGroundTruth = frameData[:, :, header.index('crackGroundTruth')]
+        plot_contour_overlay(axes[4], cameraImage, crackGroundTruth)
 
     return ['W', 'optic-flow', 'sigma', 'camera-image']
 
