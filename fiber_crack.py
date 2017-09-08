@@ -8,6 +8,7 @@ from typing import Callable, List
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numpy as np
+import h5py
 import scipy.ndimage.morphology
 import scipy.stats
 from matplotlib.backends.backend_pdf import PdfPages
@@ -68,13 +69,14 @@ globalParams = {
 # imageBaseName = 'Spec054'
 # dicKernelSize = 85
 
-# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
-# metadataFilename = 'Steel-Epoxy.csv'
-# dataDir = 'data_export'
-# imageDir = 'raw_images'
-# imageBaseName = 'Spec054'
-# dicKernelSize = 85
-# preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
+# Steel-Epoxy dataset. We are comparing crack progression between this one and PTFE-Epoxy.
+dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/Steel-Epoxy'
+dataConfig.metadataFilename = 'Steel-Epoxy.csv'
+dataConfig.dataDir = 'data_export'
+dataConfig.imageDir = 'raw_images'
+dataConfig.imageBaseName = 'Spec054'
+dataConfig.dicKernelSize = 85
+dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
@@ -95,13 +97,13 @@ globalParams = {
 # dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 # Older, different experiments.
-dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/20151125-Spec012'
-dataConfig.metadataFilename = '20152411-Spec012.csv'
-dataConfig.dataDir = 'export'
-# dataConfig.dataDir = 'data_export_fine'
-dataConfig.imageDir = ''
-dataConfig.imageBaseName = '20152411-Spec012'
-dataConfig.dicKernelSize = 81
+# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/20151125-Spec012'
+# dataConfig.metadataFilename = '20152411-Spec012.csv'
+# dataConfig.dataDir = 'export'
+# # dataConfig.dataDir = 'data_export_fine'
+# dataConfig.imageDir = ''
+# dataConfig.imageBaseName = '20152411-Spec012'
+# dataConfig.dicKernelSize = 81
 # dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 # # PTFE-Epoxy with fine spatial and temporal resolutions, mid-experiment.
@@ -303,6 +305,8 @@ def plot_crack_area_figures(dataset: 'Dataset'):
     fig = plotting.plot_crack_area_chart(dataset)
 
     figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
+    if not os.path.exists(figuresDir):
+        os.makedirs(figuresDir)
     fig.savefig(os.path.join(figuresDir, 'crack-area'), dpi=300)
 
 
@@ -429,12 +433,54 @@ def export_crack_volume(dataset: 'Dataset'):
     fig.savefig(os.path.join(outDir, 'crack-volume-legend.png'))
 
 
+def export_crack_propagation(dataset: 'Dataset'):
+    """
+    Export data required for crack propagation comparison into an HDF file.\
+    :param dataset:
+    :return:
+    """
+
+    # Create the output dir.
+    crackDataDir = os.path.join(outDir, 'crack-propagation')
+    if not os.path.exists(crackDataDir):
+        os.makedirs(crackDataDir)
+
+    # Remove the old file, if exists.
+    crackDataFilePath = os.path.join(crackDataDir, 'crack-propagation_{}.hdf'.format(dataConfig.metadataFilename))
+    if os.path.exists(crackDataFilePath):
+        os.remove(crackDataFilePath)
+
+    print("Exporting crack propagation data to {}.".format(crackDataFilePath))
+
+    h5File = h5py.File(crackDataFilePath, 'w')
+
+    header = dataset.get_header()
+    crack = dataset.h5Data[..., header.index('sigmaSkeleton')]  # type: np.ndarray
+    frameMap = dataset.get_frame_map()
+    strain = dataset.get_metadata_column('Strain (%)')
+
+    h5File.create_dataset('sigmaSkeleton', data=crack)
+    h5File.create_dataset('frameMap', data=frameMap)
+    h5File.create_dataset('strain', data=strain)
+    
+    h5File.close()
+
+
 def main():
+
+    # Define which commands are possible.
+    commandMap = {
+        'plot': lambda: plot_to_pdf(dataset, plot_crack_extraction_view),
+        'export-crack-volume': lambda: export_crack_volume(dataset),
+        'optic-flow': lambda: plot_optic_flow(dataset),
+        'export-figures': lambda: plot_figures(dataset, frame),
+        'export-crack-propagation': lambda: export_crack_propagation(dataset),
+        'plot-prediction': lambda: plot_to_pdf(dataset, plot_crack_prediction_view)
+    }
 
     # Parse the arguments.
     parser = argparse.ArgumentParser('Fiber crack.')
-    parser.add_argument('-c', '--command', default='plot',
-                        choices=['plot', 'export-crack-volume', 'optic-flow', 'export-figures', 'plot-prediction'])
+    parser.add_argument('-c', '--command', default='plot', choices=commandMap.keys())
     parser.add_argument('-f', '--frame', default=None, type=int)
     args = parser.parse_args()
 
@@ -456,13 +502,7 @@ def main():
     timeStart = time.time()
     print("Executing command: {}".format(args.command))
     frame = args.frame if 'frame' in args.__dict__ else None
-    commandMap = {
-        'plot': lambda: plot_to_pdf(dataset, plot_crack_extraction_view),
-        'export-crack-volume': lambda: export_crack_volume(dataset),
-        'optic-flow': lambda: plot_optic_flow(dataset),
-        'export-figures': lambda: plot_figures(dataset, frame),
-        'plot-prediction': lambda: plot_to_pdf(dataset, plot_crack_prediction_view)
-    }
+
     commandMap[args.command]()
     print("Command executed in {:.3f} s.".format(time.time() - timeStart))
 
