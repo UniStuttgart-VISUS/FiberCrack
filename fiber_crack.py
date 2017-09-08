@@ -70,13 +70,13 @@ globalParams = {
 # dicKernelSize = 85
 
 # Steel-Epoxy dataset. We are comparing crack progression between this one and PTFE-Epoxy.
-dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/Steel-Epoxy'
-dataConfig.metadataFilename = 'Steel-Epoxy.csv'
-dataConfig.dataDir = 'data_export'
-dataConfig.imageDir = 'raw_images'
-dataConfig.imageBaseName = 'Spec054'
-dataConfig.dicKernelSize = 85
-dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
+# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/Steel-Epoxy'
+# dataConfig.metadataFilename = 'Steel-Epoxy.csv'
+# dataConfig.dataDir = 'data_export'
+# dataConfig.imageDir = 'raw_images'
+# dataConfig.imageBaseName = 'Spec054'
+# dataConfig.dicKernelSize = 85
+# dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
@@ -86,15 +86,15 @@ dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 # dicKernelSize = 55
 
 # The cleanest dataset: PTFE with epoxy.
-# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/PTFE-Epoxy'
-# dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
-# dataConfig.dataDir = 'data_export'
-# # dataConfig.dataDir = 'data_export_fine'
-# dataConfig.imageDir = 'raw_images'
-# dataConfig.groundTruthDir = 'ground_truth'
-# dataConfig.imageBaseName = 'Spec048'
-# dataConfig.dicKernelSize = 81
-# dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
+dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/PTFE-Epoxy'
+dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
+dataConfig.dataDir = 'data_export'
+# dataConfig.dataDir = 'data_export_fine'
+dataConfig.imageDir = 'raw_images'
+dataConfig.groundTruthDir = 'ground_truth'
+dataConfig.imageBaseName = 'Spec048'
+dataConfig.dicKernelSize = 81
+dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 # Older, different experiments.
 # dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/20151125-Spec012'
@@ -406,15 +406,18 @@ def export_crack_volume(dataset: 'Dataset'):
     crackAreaMeasured = dataset.get_metadata_column('crackAreaUnmatchedAndEntropy')
     firstNonEmptyFrame = next(i for i, area in enumerate(crackAreaMeasured.tolist()) if area > 0)
 
-    colorMap = plt.get_cmap('viridis')
-    frameMap = dataset.get_frame_map()
+    strain = dataset.get_metadata_column('Strain (%)')
+    minStrain = strain[firstNonEmptyFrame]
+    maxStrain = np.max(strain)
+
+    colorMap = plt.get_cmap('plasma')
 
     for f in range(0, frameNumber):
         crackArea = dataset.get_column_at_frame(f, 'cracksFromUnmatchedAndEntropy')
         crackAreaUint8 = np.zeros(crackArea.shape[0:2] + (4,), dtype=np.uint8)
 
-        # Avoid mapping empty frames to colors, so that we use the full color map.
-        t = (f - firstNonEmptyFrame) / (frameNumber - firstNonEmptyFrame)
+        # Can be negative, since we map color not to the full strain range.
+        t = max(0.0, (strain[f] - minStrain) / (maxStrain - minStrain))
 
         crackAreaUint8[crackArea == 1.0] = np.asarray(colorMap(t)) * 255
 
@@ -426,9 +429,10 @@ def export_crack_volume(dataset: 'Dataset'):
     # Export the color mapping legend.
     fig = plt.figure(figsize=(4, 1))
     ax = fig.add_axes([0.05, 0.5, 0.9, 0.25])
-    norm = mpl.colors.Normalize(vmin=frameMap[firstNonEmptyFrame], vmax=frameMap[frameNumber - 1])
+
+    norm = mpl.colors.Normalize(vmin=minStrain, vmax=maxStrain)
     colorBar = mpl.colorbar.ColorbarBase(ax, cmap=colorMap, norm=norm, orientation='horizontal')
-    colorBar.set_label('Frame')
+    colorBar.set_label('Strain (%)')
 
     fig.savefig(os.path.join(outDir, 'crack-volume-legend.png'))
 
