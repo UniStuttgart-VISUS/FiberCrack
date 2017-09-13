@@ -302,17 +302,17 @@ def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
 
 
 def plot_crack_area_figures(dataset: 'Dataset'):
-    fig = plotting.plot_crack_area_chart(dataset)
-
     figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
     if not os.path.exists(figuresDir):
         os.makedirs(figuresDir)
+
+    fig = plotting.plot_crack_area_chart(dataset, csvOutPath=os.path.join(figuresDir, 'crack-area-data.csv'))
     fig.savefig(os.path.join(figuresDir, 'crack-area'), dpi=300)
 
 
 def plot_figures(dataset: 'Dataset', frame=None):
-    plot_frame_data_figures(dataset, frame)
     plot_crack_area_figures(dataset)
+    plot_frame_data_figures(dataset, frame)
 
 
 def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarray, List[str]], None]):

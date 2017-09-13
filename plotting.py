@@ -1,5 +1,6 @@
 import math
 import colorsys
+import csv
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -205,15 +206,25 @@ def plot_feature_histograms_for_frame(axes, frameData, header):
     axes[1].get_yaxis().set_visible(False)
 
 
-def plot_crack_area_chart(dataset: 'Dataset'):
+def plot_crack_area_chart(dataset: 'Dataset', csvOutPath: str=None):
     """
     Plots area of the crack (a scalar) detected by various methods
     against time (or more precisely, frame index).
 
+    :param csvOutPath:
     :param dataset:
     :return:
     """
+
     frameMap = dataset.get_frame_map()
+
+    result = []
+    resultHeader = []
+
+    result.append(np.arange(0, dataset.get_frame_number()).tolist())
+    resultHeader.append('frameIndex')
+    result.append(frameMap)
+    resultHeader.append('frameNumber')
 
     fig = plt.figure()
     fig.set_size_inches(4, 3)
@@ -239,11 +250,8 @@ def plot_crack_area_chart(dataset: 'Dataset'):
         if name != 'crackAreaGroundTruth':
             ax.plot(crackArea, label='Estimated', linewidth=1.0)
 
-    # Plot the area of the crack ground truth. (the images)
-    # crackArea = dataset.get_metadata_column('crackAreaGroundTruthPhysical')
-    # dataX = [i for i, val in enumerate(crackArea) if val > 0]
-    # dataY = [val for i, val in enumerate(crackArea) if val > 0]
-    # ax.scatter(dataX, dataY, label='Manually measured', marker='x')
+            result.append(crackArea)
+            resultHeader.append(name + 'Physical')
 
     # A hacky way to convert x axis labels from frame indices to frame numbers.
     locs, labels = plt.xticks()
@@ -269,6 +277,20 @@ def plot_crack_area_chart(dataset: 'Dataset'):
                     groundTruth[:, header.index('std')] * 3.0,
                     fmt='x', label='Manual (with std)')
 
+        # Export data to CSV.
+
+        # Ground truth data is sparse (not for all frames).
+        # Expand a ground truth column into a full column, with a value for each frame.
+        def sparse_data_to_full_column(data: np.ndarray):
+            column = np.zeros((dataset.get_frame_number(), 1), dtype=np.float)
+            column[groundTruth[:, header.index('frame')].astype(np.int)] = data[..., np.newaxis]
+            return column[:, 0].tolist()
+
+        result.append(sparse_data_to_full_column(groundTruth[:, header.index('average')]))
+        resultHeader.append('crackAreaGroundTruthAverage')
+        result.append(sparse_data_to_full_column(groundTruth[:, header.index('std')] * 3.0))
+        resultHeader.append('crackAreaGroundTruthTripleStd')
+
         ax.bar([0], [0], color='g', alpha=0.5, label='Percentage error')  # Empty series, just for legend.
 
         ax.legend(loc=0)
@@ -291,14 +313,21 @@ def plot_crack_area_chart(dataset: 'Dataset'):
             estimated = crackArea[int(frameIndex)]
             percentageError[j] = math.fabs((truth - estimated) / truth) * 100
 
-        print(percentageError)
         ax2.bar(groundTruth[:, 0], percentageError, color='g', alpha=0.5, zorder=-10)
         ax2.yaxis.set_major_locator(ticker.MultipleLocator(10))
 
         ax2.set_ylabel('Error, %')
         ax2.set_ylim(bottom=0, top=100)
 
-    # plt.legend()
+        result.append(sparse_data_to_full_column(percentageError))
+        resultHeader.append('crackAreaPercentageError')
+
+    if csvOutPath is not None:
+        print("Writing crack area chart data to a CSV file at {}".format(csvOutPath))
+        with open(csvOutPath, 'w', newline='\n', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(resultHeader)
+            writer.writerows(map(list, zip(*result)))  # Transpose and write out.
 
     return fig
 
