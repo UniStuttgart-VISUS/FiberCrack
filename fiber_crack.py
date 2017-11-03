@@ -254,7 +254,7 @@ def compute_and_append_results(dataset: 'Dataset'):
 
 def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
 
-    figureNumber = 18
+    figureNumber = 19
     figures = [plt.figure(dpi=300) for i in range(figureNumber)]
     axes = [fig.add_subplot(1, 1, 1) for fig in figures]
 
@@ -270,15 +270,15 @@ def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
         # Plot the data.
         labels1 = plotting.plot_original_data_for_frame(axes[0:5], frameData, dataset.get_header())
         labels2 = plotting.plot_unmatched_cracks_for_frame(axes[5:10], frameData, dataset.get_header())
-        labels3 = plotting.plot_image_cracks_for_frame(axes[10:15], frameData, dataset.get_header())
-        labels4 = plotting.plot_reference_crack_for_frame(axes[15:18], frameData, dataset.get_header())
+        labels3 = plotting.plot_image_cracks_for_frame(axes[10:16], frameData, dataset.get_header())
+        labels4 = plotting.plot_reference_crack_for_frame(axes[16:19], frameData, dataset.get_header())
 
         # Assign the labels to the axes.
         labels = [''] * figureNumber
         labels[0:len(labels1)] = labels1
         labels[5:len(labels2)] = labels2
         labels[10:len(labels3)] = labels3
-        labels[15:len(labels4)] = labels4
+        labels[16:len(labels4)] = labels4
 
         figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
         if not os.path.exists(figuresDir):

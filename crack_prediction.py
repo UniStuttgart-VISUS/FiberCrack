@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split
 
 import FiberCrack.Dataset as Dataset
 from PythonExtras.Normalizer import Normalizer
-from PythonExtras.numpy_extras import NumpyDynArray, extract_patches
+from PythonExtras.numpy_extras import NumpyDynArray, extract_patches_slow
 
 
 __all__ = ['append_crack_prediction_spatial', 'append_crack_prediction_simple']
@@ -67,7 +67,7 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
 
         # Fetch all relevant data for this frame.
         features = dataset.h5Data[f, ...][..., featureIndices]
-        patches, *r = extract_patches(features, [0, 1], patchSize)
+        patches, *r = extract_patches_slow(features, [0, 1], tuple(patchSize))
 
         # Select features that are used as input for the net.
         patchesX = patches[..., xFeatureIndices]
@@ -110,7 +110,7 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
 
         # Fetch all relevant data for this frame.
         features = dataset.h5Data[f, ...][..., featureIndices]
-        patches, patchCenters, patchNumber = extract_patches(features, [0, 1], patchSize)
+        patches, patchCenters, patchNumber = extract_patches_slow(features, [0, 1], tuple(patchSize))
 
         # Select features that are used as input for the net.
         patchesX = patches[..., xFeatureIndices]

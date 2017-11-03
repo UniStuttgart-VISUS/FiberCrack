@@ -143,9 +143,13 @@ def plot_image_cracks_for_frame(axes, frameData: np.ndarray, header):
     cracksFromUnmatchedAndEntropy = frameData[..., header.index('cracksFromUnmatchedAndEntropy')]
     plot_contour_overlay(axes[4], cameraImageData, cracksFromUnmatchedAndEntropy)
 
+    # If we have enough axes, plot
+    if len(axes) > 5:
+        axes[5].imshow(cracksFromUnmatchedAndEntropy.transpose(), origin='lower', cmap='gray')
+
     return ['image-variance', 'image-variance-crack',
             'image-entropy', 'image-entropy-crack',
-            'matched-pixels-entropy-crack']
+            'matched-pixels-entropy-crack', 'matched-pixels-entropy-crack-raw']
 
 
 def plot_crack_prediction_for_frame(axes, frameData: np.ndarray, header):
