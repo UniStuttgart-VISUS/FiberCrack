@@ -57,6 +57,8 @@ globalParams = {
     'exportedVolumeTimestepWidth': 3,
     'exportedVolumeGradientWidth': 3,
     'exportedVolumeSkippedFrames': 5,
+    'exportedVolumeStrainMin': 4.0,
+    'exportedVolumeStrainMax': 7.5,
 
     'allTextureKernelMultipliers': [2.0, 1.5, 1.0, 0.5, 0.25],
     'textureFilters': ['entropy', 'variance']
@@ -70,13 +72,15 @@ globalParams = {
 # dicKernelSize = 85
 
 # Steel-Epoxy dataset. We are comparing crack progression between this one and PTFE-Epoxy.
-# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/Steel-Epoxy'
-# dataConfig.metadataFilename = 'Steel-Epoxy.csv'
-# dataConfig.dataDir = 'data_export'
-# dataConfig.imageDir = 'raw_images'
-# dataConfig.imageBaseName = 'Spec054'
-# dataConfig.dicKernelSize = 85
-# dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
+dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/Steel-Epoxy'
+dataConfig.metadataFilename = 'Steel-Epoxy.csv'
+dataConfig.dataDir = 'data_export'
+dataConfig.imageDir = 'raw_images'
+dataConfig.imageBaseName = 'Spec054'
+dataConfig.dicKernelSize = 85
+dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
+# globalParams['exportedVolumeSkippedFrames'] = 15
+globalParams['unmatchedAndEntropyKernelMultiplier'] = 0.75
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
@@ -86,15 +90,15 @@ globalParams = {
 # dicKernelSize = 55
 
 # The cleanest dataset: PTFE with epoxy.
-dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/PTFE-Epoxy'
-dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
-dataConfig.dataDir = 'data_export'
-# dataConfig.dataDir = 'data_export_fine'
-dataConfig.imageDir = 'raw_images'
-dataConfig.groundTruthDir = 'ground_truth'
-dataConfig.imageBaseName = 'Spec048'
-dataConfig.dicKernelSize = 81
-dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
+# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/PTFE-Epoxy'
+# dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
+# dataConfig.dataDir = 'data_export'
+# # dataConfig.dataDir = 'data_export_fine'
+# dataConfig.imageDir = 'raw_images'
+# dataConfig.groundTruthDir = 'ground_truth'
+# dataConfig.imageBaseName = 'Spec048'
+# dataConfig.dicKernelSize = 81
+# dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 # Older, different experiments.
 # dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/20151125-Spec012'
@@ -401,18 +405,22 @@ def export_crack_volume(dataset: 'Dataset'):
     frameWidth = globalParams['exportedVolumeTimestepWidth']
     frameNumber = dataset.get_frame_number() - framesToSkip
     # The volume should be exported in Z,Y,X,C with C-order.
-    volume = np.empty((frameNumber * frameWidth, frameSize[1], frameSize[0], 4), dtype=np.uint8)
+    volume = np.zeros((frameNumber * frameWidth, frameSize[1], frameSize[0], 4), dtype=np.uint8)
 
-    crackAreaMeasured = dataset.get_metadata_column('crackAreaUnmatchedAndEntropy')
-    firstNonEmptyFrame = next(i for i, area in enumerate(crackAreaMeasured.tolist()) if area > 0)
+    # crackAreaMeasured = dataset.get_metadata_column('crackAreaUnmatchedAndEntropy')
+    # firstNonEmptyFrame = next(i for i, area in enumerate(crackAreaMeasured.tolist())
+    #                           if area > 0 and dataset.get_metadata_val(i, 'hasCameraImage'))
 
     strain = dataset.get_metadata_column('Strain (%)')
-    minStrain = strain[firstNonEmptyFrame]
-    maxStrain = np.max(strain)
+    minStrain = globalParams['exportedVolumeStrainMin']
+    maxStrain = globalParams['exportedVolumeStrainMax']
 
     colorMap = plt.get_cmap('plasma')
 
     for f in range(0, frameNumber):
+        if not dataset.get_metadata_val(f, 'hasCameraImage'):
+            continue
+
         crackArea = dataset.get_column_at_frame(f, 'cracksFromUnmatchedAndEntropy')
         crackAreaUint8 = np.zeros(crackArea.shape[0:2] + (4,), dtype=np.uint8)
 
