@@ -81,6 +81,7 @@ dataConfig.dicKernelSize = 85
 dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 # globalParams['exportedVolumeSkippedFrames'] = 15
 globalParams['unmatchedAndEntropyKernelMultiplier'] = 0.75
+globalParams['exportedVolumeSkippedFrames'] = 4
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
