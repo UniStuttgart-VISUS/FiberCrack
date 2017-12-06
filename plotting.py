@@ -243,7 +243,7 @@ def plot_crack_area_chart(dataset: 'Dataset', csvOutPath: str=None):
     crackAreaFeatures = dataset.get_str_array_attr('crackAreaNames')
     crackAreaFeaturesShort = dataset.get_str_array_attr('crackAreaNamesShort')
 
-    featuresToPlot = ['unmatchedAndEntropy']
+    featuresToPlot = ['unmatchedAndEntropy', 'trackingLoss']
 
     for i, name in enumerate(crackAreaFeatures):
         shortName = crackAreaFeaturesShort[i]

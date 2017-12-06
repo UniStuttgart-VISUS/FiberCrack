@@ -242,6 +242,7 @@ def compute_and_append_results(dataset: 'Dataset'):
 
     apply_function_if_code_changed(dataset, data_augmentation.append_texture_features)
 
+    apply_function_if_code_changed(dataset, crack_detection.append_crack_from_tracking_loss)
     apply_function_if_code_changed(dataset, crack_detection.append_crack_from_unmatched_pixels)
 
     apply_function_if_code_changed(dataset, crack_detection.append_crack_from_variance)

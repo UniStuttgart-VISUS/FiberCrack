@@ -23,6 +23,7 @@ def append_estimated_crack_area(dataset: 'Dataset'):
 
     # Original feature name -> clean area result name
     crackFeatureNames = {
+        'trackingLossCrack': 'trackingLoss',
         'matchedPixelsCrack': 'unmatchedPixels',
         'cameraImageVarFiltered': 'variance',
         'cameraImageEntropyFiltered': 'entropy',

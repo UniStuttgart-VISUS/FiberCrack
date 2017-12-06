@@ -15,9 +15,31 @@ from FiberCrack.Dataset import Dataset
 import FiberCrack.image_processing as image_processing
 
 
-__all__ = ['append_crack_from_unmatched_pixels', 'append_crack_from_variance',
+__all__ = ['append_crack_from_tracking_loss',
+           'append_crack_from_unmatched_pixels', 'append_crack_from_variance',
            'append_crack_from_entropy', 'append_crack_from_unmatched_and_entropy',
            'append_reference_frame_crack']
+
+
+def append_crack_from_tracking_loss(dataset: 'Dataset'):
+    """
+    The most primitive crack estimation (not even close): if the pixel in reference frame
+    lost tracking, there's a crack at this pixel in the current frame.
+    Used only to estimate the corresponding 'crack area' and compare it against the good results.
+    :param dataset:
+    :return:
+    """
+
+    header = dataset.get_header()
+
+    newColumnIndex = dataset.create_or_get_column('trackingLossCrack')
+    for frameIndex in range(0, dataset.get_frame_number()):
+        frameData = dataset.h5Data[frameIndex, ...]
+
+        sigma = frameData[:, :, header.index('sigma')]
+
+        # Pixels with sigma = -1 have lost tracking.
+        dataset.h5Data[frameIndex, :, :, newColumnIndex] = (sigma < 0)
 
 
 def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
