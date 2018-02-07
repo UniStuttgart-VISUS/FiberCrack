@@ -24,7 +24,7 @@ from FiberCrack.Dataset import Dataset
 import FiberCrack.image_processing as image_processing
 
 from PythonExtras.numpy_extras import slice_along_axis
-from PythonExtras.volume_tools import write_volume_to_datraw
+from PythonExtras.volume_tools import write_volume_to_datraw, write_volume_sequence
 
 np.random.seed(13)  # Fix the seed for reproducibility.
 # import tensorflow as tf
@@ -43,7 +43,7 @@ dataConfig.reloadOriginalData = False
 maxFrames = 99999
 recomputeResults = False
 
-outDir = 'T:/projects/SimtechOne/out/fiber'
+outDir = 'T:/out/fiber-crack'
 
 dicKernelSize = 55
 
@@ -447,6 +447,31 @@ def export_crack_volume(dataset: 'Dataset'):
     fig.savefig(os.path.join(outDir, 'crack-volume-legend.png'))
 
 
+def export_displacement_volume(dataset: 'Dataset'):
+    frameSize = dataset.get_frame_size()
+
+    frameNumber = dataset.get_frame_number()
+    # The volume should be exported in Z,Y,X with C-order.
+    volume = np.zeros((frameNumber, 1, frameSize[1], frameSize[0]), dtype=np.float)
+
+    for f in range(0, frameNumber):
+        displacementX = dataset.get_column_at_frame(f, 'u')
+        displacementY = dataset.get_column_at_frame(f, 'v')
+
+        volume[f, 0, ...] = np.transpose(np.sqrt(np.square(displacementX) + np.square(displacementY)))
+
+    maxValue = np.max(volume)
+
+    for f in range(0, frameNumber):
+        sigma = dataset.get_column_at_frame(f, 'sigma')
+        volume[f, 0, ...] = volume[f, 0, ...] / maxValue * 127 + 127
+        for y in range(volume.shape[2]):
+            volume[f, 0, y, :][sigma[:, y] < 0] = 0  # Set to zero areas with no tracking.
+
+    volumeDir = os.path.join(outDir, os.path.basename(dataConfig.metadataFilename))
+    write_volume_sequence(volumeDir, volume, clip=(0, 255), dtype=np.uint8)
+
+
 def export_crack_propagation(dataset: 'Dataset'):
     """
     Export data required for crack propagation comparison into an HDF file.\
@@ -486,6 +511,7 @@ def main():
     commandMap = {
         'plot': lambda: plot_to_pdf(dataset, plot_crack_extraction_view),
         'export-crack-volume': lambda: export_crack_volume(dataset),
+        'export-displacement-volume': lambda: export_displacement_volume(dataset),
         'optic-flow': lambda: plot_optic_flow(dataset),
         'export-figures': lambda: plot_figures(dataset, frame),
         'export-crack-propagation': lambda: export_crack_propagation(dataset),

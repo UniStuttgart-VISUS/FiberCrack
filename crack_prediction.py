@@ -187,7 +187,7 @@ def append_crack_prediction_simple(dataset: 'Dataset'):
         features = dataset.h5Data[f, ...][..., featureIndices]
         featuresFlat = features.reshape((-1, featureNumber))
 
-        predictionFlat = model.predict(normalizerX.scale(featuresFlat))
+        predictionFlat = model.predict(normalizerX.scale(featuresFlat.astype(np.float)))
         prediction = predictionFlat.reshape((frameSize + (1,)))
 
         dataset.h5Data[f, ..., outputIndex1] = prediction[..., 0]
