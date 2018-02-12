@@ -117,7 +117,7 @@ def append_crack_prediction_spatial(dataset: 'Dataset', allTextureKernelSizes,
         # Flatten the patch.
         patchesX = patchesX.reshape((patchesX.shape[0], -1))
 
-        predictionFlat = model.predict(normalizerX.scale(patchesX))
+        predictionFlat = model.predict(normalizerX.scale(patchesX.astype(np.float)))
         prediction = predictionFlat.reshape(tuple(patchNumber))
 
         min = patchCenters[0]
