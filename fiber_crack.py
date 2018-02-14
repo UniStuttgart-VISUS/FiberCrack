@@ -461,10 +461,19 @@ def export_displacement_volume(dataset: 'Dataset'):
         volume[f, 0, ...] = np.transpose(np.sqrt(np.square(displacementX) + np.square(displacementY)))
 
     maxValue = np.max(volume)
+    meanValue = np.mean(volume)
+    print("Max displacement value (mapped to 255): {}".format(maxValue))
+    print("Mean displacement value: {}".format(meanValue))
+
+    # Manually set the mapping range to make it consistent across different datasets.
+    mappingMax = 700
+    if mappingMax < maxValue:
+        raise RuntimeError("Dataset values are getting clipped when mapping to volume values. Max value: {}"
+                           .format(maxValue))
 
     for f in range(0, frameNumber):
         sigma = dataset.get_column_at_frame(f, 'sigma')
-        volume[f, 0, ...] = volume[f, 0, ...] / maxValue * 127 + 127
+        volume[f, 0, ...] = volume[f, 0, ...] / mappingMax * 127 + 127
         for y in range(volume.shape[2]):
             volume[f, 0, y, :][sigma[:, y] < 0] = 0  # Set to zero areas with no tracking.
 
