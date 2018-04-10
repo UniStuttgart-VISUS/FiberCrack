@@ -14,7 +14,7 @@ import skimage.util
 from FiberCrack.Dataset import Dataset
 from FiberCrack.data_loading import DataImportConfig
 import FiberCrack.image_processing as image_processing
-from PythonExtras.data_loading import readDataFromCsv
+from PythonExtras.data_loading import read_csv_data
 
 __all__ = ['append_camera_image', 'append_ground_truth_image', 'append_matched_pixels',
            'zero_pixels_without_tracking', 'append_data_image_mapping', 'append_physical_frame_size',
@@ -304,7 +304,7 @@ def append_crack_area_ground_truth(dataset: 'Dataset', dataConfig: 'DataImportCo
         return np.count_nonzero(np.array(frameMap, dtype=np.int)[:-1] < frameNumber)
 
     path = os.path.join(dataConfig.basePath, dataConfig.crackAreaGroundTruthPath)
-    groundTruth, header = readDataFromCsv(path)
+    groundTruth, header = read_csv_data(path)
     groundTruth[:, 0] = [get_closest_frame_index(frameNumber) for frameNumber in groundTruth[:, 0]]
 
     # Fetch data-camera-phys.size mapping details.

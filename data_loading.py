@@ -14,7 +14,7 @@ import skimage.util
 from PIL import Image
 
 from FiberCrack.Dataset import Dataset
-from PythonExtras.data_loading import readDataFromCsv, readDataFromTiff
+from PythonExtras.data_loading import read_csv_data, read_tiff_data
 
 __all__ = ['DataImportConfig', 'load_csv_data', 'load_tiff_data']
 
@@ -71,7 +71,7 @@ def load_csv_data(config: 'DataImportConfig'):
         originalFeatureNumber = None
 
         # Load the metadata, describing each frame of the experiment.
-        metadata, metaheader = readDataFromCsv(path.join(config.basePath, config.metadataFilename))
+        metadata, metaheader = read_csv_data(path.join(config.basePath, config.metadataFilename))
 
         dataFilenameList = os.listdir(path.join(config.basePath, config.dataDir))
         frameNumber = min(len(dataFilenameList), config.maxFrames)
@@ -88,7 +88,7 @@ def load_csv_data(config: 'DataImportConfig'):
                 break
 
             filepath = path.join(config.basePath, config.dataDir, filename)
-            frameData, frameHeader = readDataFromCsv(filepath)
+            frameData, frameHeader = read_csv_data(filepath)
 
             # Figure out the size of the frame.
             # Count its width by finding where the value of 'y' changes the first time.
@@ -179,7 +179,7 @@ def load_tiff_data(config: 'DataImportConfig'):
 
         # Peek into the files to determine the number of frames and size of 'data frames'.
         firstFilePath = path.join(config.basePath, config.dataDir, tiffFileMap['exx'])
-        firstFileData = readDataFromTiff(firstFilePath)
+        firstFileData = read_tiff_data(firstFilePath)
         frameNumber = firstFileData.shape[0]
         dataFrameSize = firstFileData.shape[1:3]
 
@@ -218,7 +218,7 @@ def load_tiff_data(config: 'DataImportConfig'):
             featureIndex += 1
 
             filepath = path.join(config.basePath, config.dataDir, filename)
-            featureData = readDataFromTiff(filepath)
+            featureData = read_tiff_data(filepath)
             header.append(featureName)
 
             # Check the data dimensions.
