@@ -17,7 +17,7 @@ class Dataset:
         # of the data in advance.
 
         augmentedFeatureNumber = 4
-        resultsFeatureNumber = 30  # Approximately, leave some empty.
+        resultsFeatureNumber = 40  # Approximately, leave some empty.
 
         return augmentedFeatureNumber + resultsFeatureNumber
 

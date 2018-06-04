@@ -42,7 +42,7 @@ def append_crack_from_tracking_loss(dataset: 'Dataset'):
         dataset.h5Data[frameIndex, :, :, newColumnIndex] = (sigma < 0)
 
 
-def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
+def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius, unmatchedPixelsPadding):
     """
     Detect the crack pixels based on which pixels haven't been 'matched to'
     from the reference frame. These pixels have 'appeared out of nowhere' and
@@ -57,13 +57,24 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
 
     # Prepare columns for the results.
     index1 = dataset.create_or_get_column('matchedPixelsGaussThres')
-    index2 = dataset.create_or_get_column('matchedPixelsGaussThresClean')
-    index3 = dataset.create_or_get_column('matchedPixelsCrack')
+    index2 = dataset.create_or_get_column('matchedPixelsObjectsRemoved')
+    index3 = dataset.create_or_get_column('matchedPixelsHolesRemoved')
+    index4 = dataset.create_or_get_column('matchedPixelsCrack')
 
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, ...]
         matchedPixels = frameData[:, :, header.index('matched')]
+
+        # Manually remove the unmatched pixels that are pushing into the image from the sides.
+        # todo It would be better to remove regions adjacent to borders using morphology.
+        if unmatchedPixelsPadding > 0.0:
+            paddingWidth = int(frameWidth * unmatchedPixelsPadding)
+            paddingHeight = int(frameHeight * unmatchedPixelsPadding)
+            matchedPixels[:paddingWidth, :] = True
+            matchedPixels[-paddingWidth:, :] = True
+            matchedPixels[:, :paddingHeight] = True
+            matchedPixels[:, -paddingHeight:] = True
 
         # Gaussian smoothing.
         matchedPixelsGauss = skimage.filters.gaussian(matchedPixels, 2.0)
@@ -83,8 +94,8 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
             tempResult = skimage.morphology.remove_small_objects(
                 matchedPixelsGaussThres.astype(np.bool), min_size=maxObjectSize)
 
-            cropSelector = (slice(int(frameWidth * 0.1), int(frameWidth * 0.9)),
-                            slice(int(frameHeight * 0.1), int(frameHeight * 0.9)))
+            cropSelector = (slice(int(frameWidth * unmatchedPixelsPadding), int(frameWidth * unmatchedPixelsPadding)),
+                            slice(int(frameHeight * unmatchedPixelsPadding), int(frameHeight * unmatchedPixelsPadding)))
             holePixelNumber = np.count_nonzero(tempResult[cropSelector] == False)
             tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
 
@@ -93,11 +104,12 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
             tempResult = skimage.morphology.remove_small_objects(tempResult, min_size=maxObjectSize)
             tempResult = skimage.morphology.binary_dilation(tempResult, selem)
             tempResult = skimage.morphology.binary_dilation(tempResult, selem)
+            matchedPixelsObjectsRemoved = tempResult.copy()
             tempResult = skimage.morphology.binary_dilation(tempResult, selem)
             tempResult = skimage.morphology.binary_dilation(tempResult, selem)
             tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
 
-            matchedPixelsGaussThresClean = tempResult.copy()
+            matchedPixelsHolesRemoved = tempResult.copy()
 
             # Don't erode back: instead, compensate for the kernel used during DIC.
             currentDilation = 2  # Because we dilated twice without eroding back.
@@ -108,8 +120,9 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius):
 
         # Write the results.
         dataset.h5Data[frameIndex, :, :, index1] = matchedPixelsGaussThres
-        dataset.h5Data[frameIndex, :, :, index2] = matchedPixelsGaussThresClean
-        dataset.h5Data[frameIndex, :, :, index3] = matchedPixelsCrack
+        dataset.h5Data[frameIndex, :, :, index2] = matchedPixelsObjectsRemoved
+        dataset.h5Data[frameIndex, :, :, index3] = matchedPixelsHolesRemoved
+        dataset.h5Data[frameIndex, :, :, index4] = matchedPixelsCrack
 
 
 def append_crack_from_variance(dataset: 'Dataset', textureKernelSize, varianceThreshold=0.003):
@@ -169,7 +182,8 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
     selem = scipy.ndimage.morphology.generate_binary_structure(2, 2)
 
     index1 = dataset.create_or_get_column('cameraImageEntropy')
-    index2 = dataset.create_or_get_column('cameraImageEntropyFiltered')
+    index2 = dataset.create_or_get_column('cameraImageEntropyBinary')
+    index3 = dataset.create_or_get_column('cameraImageEntropyFiltered')
 
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, ...]
@@ -187,7 +201,8 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
             entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
 
         dataset.h5Data[frameIndex, ..., index1] = cameraImageEntropy
-        dataset.h5Data[frameIndex, ..., index2] = entropyFiltered
+        dataset.h5Data[frameIndex, ..., index2] = entropyBinary
+        dataset.h5Data[frameIndex, ..., index3] = entropyFiltered
 
 
 def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSize, unmatchedAndEntropyKernelMultiplier,
@@ -214,12 +229,14 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
     # Use a smaller entropy kernel size, since we narrow the search area using unmatched pixels.
     entropyFilterRadius = int(textureKernelSize * unmatchedAndEntropyKernelMultiplier)
 
-    index = dataset.create_or_get_column('cracksFromUnmatchedAndEntropy')
+    index1 = dataset.create_or_get_column('hybridUnmatchedDilated')
+    index2 = dataset.create_or_get_column('hybridEntropyBinary')
+    index3 = dataset.create_or_get_column('hybridCracks')
 
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, :, :, :]
-        # Fetch the unmatched pixels.
-        unmathedPixels = frameData[..., header.index('matchedPixelsGaussThresClean')]  == 0
+        # Fetch the unmatched pixels (where matched pixels == 0).
+        unmathedPixels = frameData[..., header.index('matchedPixelsHolesRemoved')]  == 0
 
         # Manually remove the unmatched pixels that are pushing into the image from the sides.
         if unmatchedPixelsPadding > 0.0:
@@ -232,9 +249,11 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
         unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
         unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
 
+        unmatchedDilated = unmathedPixels.copy()
+
         # todo reuse entropy code (copy-pasting right now), but note that we might need a different kernel size.
         imageEntropy = image_processing.image_entropy_filter(frameData[..., header.index('camera')], int(entropyFilterRadius))
-        entropyBinary = imageEntropy < entropyThreshold
+        entropyBinary = imageEntropy < entropyThreshold  # type: np.ndarray
 
         entropyFiltered = entropyBinary.copy()
         for i in range(0, math.ceil(entropyFilterRadius / 2.0)):
@@ -243,7 +262,9 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
         # Crack = low entropy near unmatched pixels.
         cracks = np.logical_and(unmathedPixels, entropyFiltered)
 
-        dataset.h5Data[frameIndex, ..., index] = cracks
+        dataset.h5Data[frameIndex, ..., index1] = unmatchedDilated
+        dataset.h5Data[frameIndex, ..., index2] = entropyBinary
+        dataset.h5Data[frameIndex, ..., index3] = cracks
 
 
 def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius, sigmaSkeletonPadding=0.1):

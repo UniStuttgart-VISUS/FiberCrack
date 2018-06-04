@@ -142,7 +142,7 @@ def append_crack_prediction_simple(dataset: 'Dataset'):
     rawDataY = NumpyDynArray((-1, 1))
 
     for f in range(frameNumber):
-        crackImage = dataset.get_column_at_frame(f, 'cracksFromUnmatchedAndEntropy')
+        crackImage = dataset.get_column_at_frame(f, 'hybridCracks')
         features = dataset.h5Data[f, ...][..., featureIndices]
 
         mask = crackImage == 1.0

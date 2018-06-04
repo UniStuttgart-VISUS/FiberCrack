@@ -51,8 +51,8 @@ globalParams = {
     'textureKernelMultiplier': 1.0,
     'entropyThreshold': 1.0,
     'varianceThreshold': 0.003,
-    'unmatchedPixelsPadding': 0.1,
-    'sigmaSkeletonPadding': 0.1,
+    'unmatchedPixelsPadding': 0.15,
+    'sigmaSkeletonPadding': 0.15,
     'unmatchedAndEntropyKernelMultiplier': 0.5,
     'exportedVolumeTimestepWidth': 3,
     'exportedVolumeGradientWidth': 3,
@@ -72,16 +72,16 @@ globalParams = {
 # dicKernelSize = 85
 
 # Steel-Epoxy dataset. We are comparing crack progression between this one and PTFE-Epoxy.
-dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/Steel-Epoxy'
-dataConfig.metadataFilename = 'Steel-Epoxy.csv'
-dataConfig.dataDir = 'data_export'
-dataConfig.imageDir = 'raw_images'
-dataConfig.imageBaseName = 'Spec054'
-dataConfig.dicKernelSize = 85
-dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
-# globalParams['exportedVolumeSkippedFrames'] = 15
-globalParams['unmatchedAndEntropyKernelMultiplier'] = 0.75
-globalParams['exportedVolumeSkippedFrames'] = 4
+# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/Steel-Epoxy'
+# dataConfig.metadataFilename = 'Steel-Epoxy.csv'
+# dataConfig.dataDir = 'data_export'
+# dataConfig.imageDir = 'raw_images'
+# dataConfig.imageBaseName = 'Spec054'
+# dataConfig.dicKernelSize = 85
+# dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
+# # globalParams['exportedVolumeSkippedFrames'] = 15
+# globalParams['unmatchedAndEntropyKernelMultiplier'] = 0.75
+# globalParams['exportedVolumeSkippedFrames'] = 4
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
@@ -91,15 +91,15 @@ globalParams['exportedVolumeSkippedFrames'] = 4
 # dicKernelSize = 55
 
 # The cleanest dataset: PTFE with epoxy.
-# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/PTFE-Epoxy'
-# dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
-# dataConfig.dataDir = 'data_export'
-# # dataConfig.dataDir = 'data_export_fine'
-# dataConfig.imageDir = 'raw_images'
-# dataConfig.groundTruthDir = 'ground_truth'
-# dataConfig.imageBaseName = 'Spec048'
-# dataConfig.dicKernelSize = 81
-# dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
+dataConfig.basePath = 'T:\\data\\montreal-full\\Experiments\\PTFE-Epoxy'
+dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
+dataConfig.dataDir = 'data_export'
+# dataConfig.dataDir = 'data_export_fine'
+dataConfig.imageDir = 'raw_images'
+dataConfig.groundTruthDir = 'ground_truth'
+dataConfig.imageBaseName = 'Spec048'
+dataConfig.dicKernelSize = 81
+dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
 
 # Older, different experiments.
 # dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/20151125-Spec012'
@@ -260,9 +260,19 @@ def compute_and_append_results(dataset: 'Dataset'):
 
 def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
 
-    figureNumber = 19
-    figures = [plt.figure(dpi=300) for i in range(figureNumber)]
-    axes = [fig.add_subplot(1, 1, 1) for fig in figures]
+    # figures = [plt.figure(dpi=300) for i in range(figureNumber)]
+    # axes = [fig.add_subplot(1, 1, 1) for fig in figures]
+    figures = []
+    axes = []
+    labels = []
+
+    def axis_builder(label: str) -> plt.Axes:
+        fig = plt.figure(dpi=300)
+        ax = fig.add_subplot(1, 1, 1)
+        figures.append(fig)
+        axes.append(ax)
+        labels.append(label)
+        return ax
 
     for frame in range(dataset.get_frame_number()):
 
@@ -274,17 +284,18 @@ def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
         frameLabel = dataset.get_frame_map()[frame]
 
         # Plot the data.
-        labels1 = plotting.plot_original_data_for_frame(axes[0:5], frameData, dataset.get_header())
-        labels2 = plotting.plot_unmatched_cracks_for_frame(axes[5:10], frameData, dataset.get_header())
-        labels3 = plotting.plot_image_cracks_for_frame(axes[10:16], frameData, dataset.get_header())
-        labels4 = plotting.plot_reference_crack_for_frame(axes[16:19], frameData, dataset.get_header())
+        plotting.plot_original_data_for_frame(axis_builder, frameData, dataset.get_header())
+        plotting.plot_unmatched_cracks_for_frame(axis_builder, frameData, dataset.get_header())
+        plotting.plot_image_cracks_for_frame(axis_builder, frameData, dataset.get_header())
+        plotting.plot_reference_crack_for_frame(axis_builder, frameData, dataset.get_header())
 
         # Assign the labels to the axes.
-        labels = [''] * figureNumber
-        labels[0:len(labels1)] = labels1
-        labels[5:len(labels2)] = labels2
-        labels[10:len(labels3)] = labels3
-        labels[16:len(labels4)] = labels4
+        # todo does this work?
+        # labels = [''] * figureNumber
+        # labels[0:len(labels1)] = labels1
+        # labels[5:len(labels2)] = labels2
+        # labels[12:len(labels3)] = labels3
+        # labels[20:len(labels4)] = labels4
 
         figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
         if not os.path.exists(figuresDir):
@@ -321,7 +332,7 @@ def plot_figures(dataset: 'Dataset', frame=None):
     plot_frame_data_figures(dataset, frame)
 
 
-def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarray, List[str]], None]):
+def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[Callable[[str], plt.Axes], np.ndarray, List[str]], None]):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
 
     # Prepare for plotting
@@ -332,9 +343,16 @@ def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarra
     # Prepare a figure with subfigures.
     fig = plt.figure(dpi=300)
     axes = []
-    for f in range(0, 20):
-        axes.append(fig.add_subplot(4, 5, f + 1))
-        axes[f].axis('off')
+
+    def axis_builder(label: str) -> plt.Axes:
+        if len(axes) >= 5 * 6:
+            raise RuntimeError("PDF layout doesn't have enough subplots.")
+
+        ax = fig.add_subplot(5, 6, len(axes) + 1)
+        axes.append(ax)
+
+        ax.axis('off')
+        return ax
 
     fig.subplots_adjust(hspace=0.025, wspace=0.025)
 
@@ -348,7 +366,7 @@ def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarra
         frameData = h5Data[f, :, :, :]
 
         # The actual plotting is done by the provided function.
-        plotFrameFunction(axes, frameData, header)
+        plotFrameFunction(axis_builder, frameData, header)
 
         pdf.savefig(fig, bbox_inches='tight', dpi=300)
         for a in axes:
@@ -369,18 +387,18 @@ def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[List, np.ndarra
     pdf.close()
 
 
-def plot_crack_extraction_view(axes, frameData, header):
-    plotting.plot_original_data_for_frame(axes[0:5], frameData, header)
-    plotting.plot_unmatched_cracks_for_frame(axes[5:10], frameData, header)
-    plotting.plot_image_cracks_for_frame(axes[10:15], frameData, header)
-    plotting.plot_reference_crack_for_frame(axes[15:18], frameData, header)
-    plotting.plot_feature_histograms_for_frame(axes[18:20], frameData, header)
-    # plotting.plot_crack_prediction_for_frame(axes[18:20], frameData, header)
+def plot_crack_extraction_view(axisBuilder: Callable[[str], plt.Axes], frameData, header):
+    plotting.plot_original_data_for_frame(axisBuilder, frameData, header)
+    plotting.plot_unmatched_cracks_for_frame(axisBuilder, frameData, header)
+    plotting.plot_image_cracks_for_frame(axisBuilder, frameData, header)
+    plotting.plot_reference_crack_for_frame(axisBuilder, frameData, header)
+    plotting.plot_feature_histograms_for_frame(axisBuilder, frameData, header)
+    # plotting.plot_crack_prediction_for_frame(axisBuilder, frameData, header)
 
 
-def plot_crack_prediction_view(axes, frameData, header):
-    plotting.plot_image_cracks_for_frame(axes[0:5], frameData, header)
-    plotting.plot_crack_prediction_for_frame(axes[5:10], frameData, header)
+def plot_crack_prediction_view(axisBuilder: Callable[[str], plt.Axes], frameData, header):
+    plotting.plot_image_cracks_for_frame(axisBuilder, frameData, header)
+    plotting.plot_crack_prediction_for_frame(axisBuilder, frameData, header)
 
 
 def plot_optic_flow(dataset: 'Dataset'):
@@ -423,7 +441,7 @@ def export_crack_volume(dataset: 'Dataset'):
         if not dataset.get_metadata_val(f, 'hasCameraImage'):
             continue
 
-        crackArea = dataset.get_column_at_frame(f, 'cracksFromUnmatchedAndEntropy')
+        crackArea = dataset.get_column_at_frame(f, 'hybridCracks')
         crackAreaUint8 = np.zeros(crackArea.shape[0:2] + (4,), dtype=np.uint8)
 
         # Can be negative, since we map color not to the full strain range.

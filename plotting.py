@@ -2,6 +2,8 @@ import math
 import colorsys
 import csv
 
+from typing import Callable
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
@@ -63,37 +65,35 @@ def plot_contour_overlay(axes, backgroundImage, binaryImage):
         axes.plot(contour[:, 1], contour[:, 0], linewidth=lineWidth, color='white')
 
 
-def plot_original_data_for_frame(axes, frameData: np.ndarray, header):
+def plot_original_data_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header):
     """
     Plots raw data for a given frame.
-    :param axes:
+    :param axisBuilder: 
     :param frameData:
     :param header:
     :return:
     """
     if 'W' in header:
         imageData0 = frameData[:, :, header.index('W')]
-        axes[0].imshow(imageData0.transpose(), origin='lower', cmap='gray')
-    axes[1].imshow(color_map_hsv(frameData[..., header.index('u')],
-                                 frameData[..., header.index('v')], maxNorm=50.0)
-                   .swapaxes(0, 1), origin='lower')
+        axisBuilder('W').imshow(imageData0.transpose(), origin='lower', cmap='gray')
+    axisBuilder('optic-flow').imshow(color_map_hsv(frameData[..., header.index('u')],
+                                     frameData[..., header.index('v')], maxNorm=50.0)
+                                     .swapaxes(0, 1), origin='lower')
     # print("Sigma-plot")
-    axes[2].imshow(frameData[:, :, header.index('sigma')].transpose(), origin='lower', cmap='gray')
+    axisBuilder('sigma').imshow(np.invert(frameData[:, :, header.index('sigma')].transpose() > 0), origin='lower', cmap='gray')
     # print("Camera image")
     cameraImage = frameData[:, :, header.index('camera')]
-    axes[3].imshow(cameraImage.transpose(), origin='lower', cmap='gray')
+    axisBuilder('camera-image').imshow(cameraImage.transpose(), origin='lower', cmap='gray')
     if 'crackGroundTruth' in header:
         crackGroundTruth = frameData[:, :, header.index('crackGroundTruth')]
-        plot_contour_overlay(axes[4], cameraImage, crackGroundTruth)
-
-    return ['W', 'optic-flow', 'sigma', 'camera-image']
+        plot_contour_overlay(axisBuilder('crack-ground-truth'), cameraImage, crackGroundTruth)
 
 
-def plot_unmatched_cracks_for_frame(axes, frameData: np.ndarray, header):
+def plot_unmatched_cracks_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header):
     """
     Plots cracks detected from unmatched pixels, i.e. pixels
     that haven't been 'matched to', for a given frame.
-    :param axes:
+    :param axisBuilder: 
     :param frameData:
     :param header:
     :return: plot labels
@@ -101,24 +101,31 @@ def plot_unmatched_cracks_for_frame(axes, frameData: np.ndarray, header):
     matchedPixels = frameData[..., header.index('matched')]
     cameraImageData = frameData[..., header.index('camera')]
 
-    axes[0].imshow(matchedPixels.transpose(), origin='lower', cmap='gray')
+    axisBuilder('matched-pixels').imshow(np.invert(matchedPixels.transpose() > 0), origin='lower', cmap='gray')
 
     matchedPixelsGaussThres = frameData[..., header.index('matchedPixelsGaussThres')]
-    axes[1].imshow(matchedPixelsGaussThres.transpose(), origin='lower', cmap='gray')
+    axisBuilder('matched-pixels-gauss-thres').imshow(np.invert(matchedPixelsGaussThres.transpose() > 0), origin='lower', cmap='gray')
+
+    matchedPixelsObjectsRemoved = frameData[..., header.index('matchedPixelsObjectsRemoved')]
+    axisBuilder('matched-pixels-objects-removed')\
+        .imshow(np.invert(matchedPixelsObjectsRemoved.transpose() > 0), origin='lower', cmap='gray')
+
+    matchedPixelsHolesRemoved = frameData[..., header.index('matchedPixelsHolesRemoved')]
+    axisBuilder('matched-pixels-holes-removed')\
+        .imshow(np.invert(matchedPixelsHolesRemoved.transpose() > 0), origin='lower', cmap='gray')
+
+    plot_contour_overlay(axisBuilder('matched-pixels-holes-removed-crack'),
+                         cameraImageData, matchedPixelsHolesRemoved)
 
     matchedPixelsCrack = frameData[..., header.index('matchedPixelsCrack')]
-    axes[2].imshow(matchedPixelsCrack.transpose().astype(np.float), origin='lower', cmap='gray')
-
-    plot_contour_overlay(axes[3], cameraImageData, matchedPixelsCrack)
-
-    return ['matched-pixels', 'matched-pixels-gauss-thres',
-            'matched-pixels-filtered', 'matched-pixels-crack']
+    axisBuilder('matched-pixels-crack-raw').imshow(matchedPixelsCrack.transpose(), origin='lower', cmap='gray')
+    plot_contour_overlay(axisBuilder('matched-pixels-crack'), cameraImageData, matchedPixelsCrack)
 
 
-def plot_image_cracks_for_frame(axes, frameData: np.ndarray, header):
+def plot_image_cracks_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header):
     """
     Plot crack detected with image-based texture-feature techniques.
-    :param axes:
+    :param axisBuilder:
     :param frameData:
     :param header:
     :return: plot names
@@ -129,33 +136,36 @@ def plot_image_cracks_for_frame(axes, frameData: np.ndarray, header):
     cameraImageVar = frameData[..., header.index('cameraImageVar')]
     varianceFiltered = frameData[..., header.index('cameraImageVarFiltered')]
 
-    axes[0].imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
-    plot_contour_overlay(axes[1], cameraImageData, varianceFiltered)
+    axisBuilder('image-variance').imshow(cameraImageVar.transpose(), origin='lower', cmap='gray')
+    plot_contour_overlay(axisBuilder('image-variance-crack'), cameraImageData, varianceFiltered)
 
     # Entropy-based camera image crack extraction.
     cameraImageEntropy = frameData[..., header.index('cameraImageEntropy')]
+    cameraImageEntropyBinary = frameData[..., header.index('cameraImageEntropyBinary')]
     entropyFiltered = frameData[..., header.index('cameraImageEntropyFiltered')]
 
-    axes[2].imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
-    plot_contour_overlay(axes[3], cameraImageData, entropyFiltered)
+    axisBuilder('image-entropy').imshow(cameraImageEntropy.transpose(), origin='lower', cmap='gray')
+    axisBuilder('image-entropy-binary').imshow(cameraImageEntropyBinary.transpose(), origin='lower', cmap='gray')
+    axisBuilder('image-entropy-crack-raw').imshow(entropyFiltered.transpose(), origin='lower', cmap='gray')
+    plot_contour_overlay(axisBuilder('image-entropy-crack'), cameraImageData, entropyFiltered)
 
     # Unmatched pixels + entropy crack extraction.
-    cracksFromUnmatchedAndEntropy = frameData[..., header.index('cracksFromUnmatchedAndEntropy')]
-    plot_contour_overlay(axes[4], cameraImageData, cracksFromUnmatchedAndEntropy)
+    hybridUnmatchedDilated = np.invert(frameData[..., header.index('hybridUnmatchedDilated')] > 0)
+    hybridEntropyBinary = frameData[..., header.index('hybridEntropyBinary')]
+    hybridCracks = frameData[..., header.index('hybridCracks')]
 
-    # If we have enough axes, plot
-    if len(axes) > 5:
-        axes[5].imshow(cracksFromUnmatchedAndEntropy.transpose(), origin='lower', cmap='gray')
+    axisBuilder('hybrid-matched-dilated').imshow(np.invert(hybridUnmatchedDilated.transpose() > 0), origin='lower', cmap='gray')
+    axisBuilder('hybrid-entropy-binary').imshow(hybridEntropyBinary.transpose(), origin='lower', cmap='gray')
+    plot_contour_overlay(axisBuilder('hybrid-entropy-binary-crack'), cameraImageData, hybridEntropyBinary)
+    plot_contour_overlay(axisBuilder('hybrid-crack'), cameraImageData, hybridCracks)
 
-    return ['image-variance', 'image-variance-crack',
-            'image-entropy', 'image-entropy-crack',
-            'matched-pixels-entropy-crack', 'matched-pixels-entropy-crack-raw']
+    axisBuilder('hybrid-crack-raw').imshow(hybridCracks.transpose(), origin='lower', cmap='gray')
 
 
-def plot_crack_prediction_for_frame(axes, frameData: np.ndarray, header):
+def plot_crack_prediction_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header):
     """
     Plot crack area predicted with machine learning techniques.
-    :param axes:
+    :param axisBuilder:
     :param frameData:
     :param header:
     :return:
@@ -165,16 +175,14 @@ def plot_crack_prediction_for_frame(axes, frameData: np.ndarray, header):
 
     prediction = frameData[..., header.index('crackPredictionSpatial')]
 
-    axes[0].imshow(prediction.transpose(), origin='lower', cmap='gray')
-    plot_contour_overlay(axes[1], cameraImageData, prediction)
-
-    return ['crack-prediction', 'crack-prediction-overlay']
+    axisBuilder('crack-prediction').imshow(prediction.transpose(), origin='lower', cmap='gray')
+    plot_contour_overlay(axisBuilder('crack-prediction-overlay'), cameraImageData, prediction)
 
 
-def plot_reference_crack_for_frame(axes, frameData: np.ndarray, header):
+def plot_reference_crack_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header):
     """
     Plots the crack path in the reference frame.
-    :param axes:
+    :param axisBuilder: 
     :param frameData:
     :param header:
     :return:
@@ -183,14 +191,12 @@ def plot_reference_crack_for_frame(axes, frameData: np.ndarray, header):
     binarySigmaSkeleton = frameData[..., header.index('sigmaSkeleton')]
     binarySigmaSkeletonPruned = frameData[..., header.index('sigmaSkeletonPruned')]
 
-    axes[0].imshow(binarySigmaFiltered.transpose(), origin='lower', cmap='gray')
-    axes[1].imshow(binarySigmaSkeleton.transpose(), origin='lower', cmap='gray')
-    axes[2].imshow(binarySigmaSkeletonPruned.transpose(), origin='lower', cmap='gray')
-
-    return ['sigma-filtered', 'sigma-skeleton', 'sigma-crack']
+    axisBuilder('sigma-filtered').imshow(binarySigmaFiltered.transpose(), origin='lower', cmap='gray')
+    axisBuilder('sigma-skeleton').imshow(binarySigmaSkeleton.transpose(), origin='lower', cmap='gray')
+    axisBuilder('sigma-crack').imshow(binarySigmaSkeletonPruned.transpose(), origin='lower', cmap='gray')
 
 
-def plot_feature_histograms_for_frame(axes, frameData, header):
+def plot_feature_histograms_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData, header):
     cameraImageVar = frameData[..., header.index('cameraImageVar')]
     cameraImageEntropy = frameData[..., header.index('cameraImageEntropy')]
 
@@ -201,13 +207,16 @@ def plot_feature_histograms_for_frame(axes, frameData, header):
     varHistDomain = np.linspace(0, np.max(cameraImageVar), 16)
     entropyHistDomain = np.linspace(0, np.max(cameraImageEntropy), 16)
 
-    axes[0].bar(varHistDomain * 100, varianceHist)
-    axes[1].bar(entropyHistDomain, entropyHist)
+    varHistAx = axisBuilder('variance-histogram')
+    entHistAx = axisBuilder('entropy-histogram')
 
-    axes[0].axis('on')
-    axes[1].axis('on')
-    axes[0].get_yaxis().set_visible(False)
-    axes[1].get_yaxis().set_visible(False)
+    varHistAx.bar(varHistDomain * 100, varianceHist)
+    entHistAx.bar(entropyHistDomain, entropyHist)
+
+    varHistAx.axis('on')
+    entHistAx.axis('on')
+    varHistAx.get_yaxis().set_visible(False)
+    entHistAx.get_yaxis().set_visible(False)
 
 
 def plot_crack_area_chart(dataset: 'Dataset', csvOutPath: str=None):
