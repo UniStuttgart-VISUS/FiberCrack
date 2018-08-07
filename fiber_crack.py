@@ -345,10 +345,10 @@ def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[Callable[[str],
     axes = []
 
     def axis_builder(label: str) -> plt.Axes:
-        if len(axes) >= 5 * 6:
+        if len(axes) >= 6 * 6:
             raise RuntimeError("PDF layout doesn't have enough subplots.")
 
-        ax = fig.add_subplot(5, 6, len(axes) + 1)
+        ax = fig.add_subplot(6, 6, len(axes) + 1)
         axes.append(ax)
 
         ax.axis('off')
@@ -372,6 +372,7 @@ def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[Callable[[str],
         for a in axes:
             a.clear()
             a.axis('off')
+        axes = []
 
         print("Rendered in {:.2f} s.".format(time.time() - timeStart))
 
@@ -385,6 +386,7 @@ def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[Callable[[str],
     pdf.savefig(fig, bbox_inches='tight', dpi=300)
 
     pdf.close()
+    print("Finished plotting to {}".format(pdfPath))
 
 
 def plot_crack_extraction_view(axisBuilder: Callable[[str], plt.Axes], frameData, header):

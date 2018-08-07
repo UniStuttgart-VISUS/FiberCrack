@@ -19,7 +19,7 @@ from FiberCrack.Dataset import Dataset
 __all__ = ['plot_original_data_for_frame', 'plot_unmatched_cracks_for_frame',
            'plot_image_cracks_for_frame', 'plot_reference_crack_for_frame',
            'plot_crack_prediction_for_frame',
-           'plot_feature_histograms_for_frame', 'plot_optic_flow_for_frame'
+           'plot_feature_histograms_for_frame', 'plot_optic_flow_for_frame',
            'plot_crack_area_chart', 'plot_data_mapping']
 
 
