@@ -18,6 +18,7 @@ import FiberCrack.data_augmentation as data_augmentation
 import FiberCrack.data_loading as data_loading
 import FiberCrack.plotting as plotting
 from FiberCrack.Dataset import Dataset
+from FiberCrack.FiberCrackConfig import FiberCrackConfig
 
 from PythonExtras.numpy_extras import slice_along_axis
 from PythonExtras.volume_tools import write_volume_to_datraw, write_volume_sequence
@@ -28,44 +29,6 @@ np.random.seed(13)  # Fix the seed for reproducibility.
 
 ############### Configuration ###############
 
-dataConfig = data_loading.DataImportConfig()
-dataConfig.preloadedDataDir = 'C:/preloaded_data'
-dataConfig.preloadedDataFilename = None  # By default, decide automatically.
-dataConfig.dataFormat = 'csv'
-dataConfig.imageFilenameFormat = '{}-{:04d}_0.tif'
-
-dataConfig.reloadOriginalData = False
-
-maxFrames = 99999
-recomputeResults = False
-
-outDir = 'T:/out/fiber-crack'
-
-dataConfig.dicKernelSize = 55
-
-globalParams = {
-    'textureKernelMultiplier': 1.0,
-    'entropyThreshold': 1.0,
-    'varianceThreshold': 0.003,
-
-    'unmatchedPixelsPadding': 0.15,
-    'unmatchedPixelsMorphologyDepth': 2,         # How many dilations/erosions are used before removing objects/holes.
-    'unmatchedPixelsObjectsThreshold': 1 / 50,   # Fraction of the image area.
-    'unmatchedPixelsHolesThreshold': 1 / 6,      # Fraction of the zero-valued image area (sclaes with the crack).
-
-    'hybridKernelMultiplier': 0.5,
-    'hybridDilationDepth': 3,                    # How many dilations are applied to expand the 'search range'.
-
-    'sigmaSkeletonPadding': 0.15,
-    'exportedVolumeTimestepWidth': 3,
-    'exportedVolumeGradientWidth': 3,
-    'exportedVolumeSkippedFrames': 5,
-    'exportedVolumeStrainMin': 4.0,
-    'exportedVolumeStrainMax': 7.5,
-
-    'allTextureKernelMultipliers': [2.0, 1.5, 1.0, 0.5, 0.25],
-    'textureFilters': ['entropy', 'variance']
-}
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
 # metadataFilename = 'Steel-Epoxy.csv'
@@ -75,16 +38,7 @@ globalParams = {
 # dicKernelSize = 85
 
 # Steel-Epoxy dataset. We are comparing crack progression between this one and PTFE-Epoxy.
-# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/Steel-Epoxy'
-# dataConfig.metadataFilename = 'Steel-Epoxy.csv'
-# dataConfig.dataDir = 'data_export'
-# dataConfig.imageDir = 'raw_images'
-# dataConfig.imageBaseName = 'Spec054'
-# dataConfig.dicKernelSize = 85
-# dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
-# # globalParams['exportedVolumeSkippedFrames'] = 15
-# globalParams['hybridKernelMultiplier'] = 0.75
-# globalParams['exportedVolumeSkippedFrames'] = 4
+# -- Moved to steel-epoxy.json
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
 # metadataFilename = 'Steel-ModifiedEpoxy.csv'
@@ -94,15 +48,7 @@ globalParams = {
 # dicKernelSize = 55
 
 # The cleanest dataset: PTFE with epoxy.
-dataConfig.basePath = 'T:\\data\\montreal-full\\Experiments\\PTFE-Epoxy'
-dataConfig.metadataFilename = 'PTFE-Epoxy.csv'
-dataConfig.dataDir = 'data_export'
-# dataConfig.dataDir = 'data_export_fine'
-dataConfig.imageDir = 'raw_images'
-dataConfig.groundTruthDir = 'ground_truth'
-dataConfig.imageBaseName = 'Spec048'
-dataConfig.dicKernelSize = 81
-dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
+# -- Moved to ptfe-epoxy.json
 
 # Older, different experiments.
 # dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/20151125-Spec012'
@@ -132,30 +78,25 @@ dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
 # metadataFilename = ''
 # preloadedDataFilename = 'micro_epoxy-hole'
 
-# todo: Seems that I had a bug, always using the same wrong DIC kernel size value.
-#       For consistency, I'm keeping it this way for now, but in the future, I should remove this
-#       and adjust the 'hybridKernelMultiplier' to compensate for the change.
-#       Also, possibly, need to remove the '+1' in the DIC compensation iterations.
-dataConfig.dicKernelSize = 55
-
 #############################################
 
 
-def load_data():
-    if dataConfig.dataFormat == 'csv':
-        return data_loading.load_csv_data(dataConfig)
-    elif dataConfig.dataFormat == 'tiff':
-        return data_loading.load_tiff_data(dataConfig)
+def load_data(config: FiberCrackConfig):
+    if config.dataConfig.dataFormat == 'csv':
+        return data_loading.load_csv_data(config.dataConfig)
+    elif config.dataConfig.dataFormat == 'tiff':
+        return data_loading.load_tiff_data(config.dataConfig)
     else:
-        raise ValueError("Unknown data format: {}".format(dataConfig.dataFormat))
+        raise ValueError("Unknown data format: {}".format(config.dataConfig.dataFormat))
 
 
-def augment_data(dataset: 'Dataset'):
+def augment_data(dataset: 'Dataset', config: FiberCrackConfig):
     """
     Extends the raw data with some pre-processing.
     Doesn't compute any 'results', but rather information that can help compute the results.
 
     :param dataset:
+    :param config:
     :return:
     """
     header = dataset.get_header()
@@ -183,14 +124,14 @@ def augment_data(dataset: 'Dataset'):
     dataset.create_or_update_metadata_column('imageShiftY', imageShift[..., 1])
 
     print("Adding the camera images...")
-    data_augmentation.append_camera_image(dataset, dataConfig)
+    data_augmentation.append_camera_image(dataset, config.dataConfig)
     print("Adding the crack ground truth images...")
-    data_augmentation.append_ground_truth_image(dataset, dataConfig)
+    data_augmentation.append_ground_truth_image(dataset, config.dataConfig)
     print("Adding the matched pixels...")
-    data_augmentation.append_matched_pixels(dataset, dataConfig)
+    data_augmentation.append_matched_pixels(dataset, config.dataConfig)
 
     print("Adding crack area ground truth...")
-    data_augmentation.append_crack_area_ground_truth(dataset, dataConfig)
+    data_augmentation.append_crack_area_ground_truth(dataset, config.dataConfig)
 
     print("Zeroing the pixels that lost tracking.")
     data_augmentation.zero_pixels_without_tracking(dataset)
@@ -198,33 +139,34 @@ def augment_data(dataset: 'Dataset'):
     return dataset
 
 
-def apply_function_if_code_changed(dataset: 'Dataset', function: Callable[..., None]):
+def apply_function_if_code_changed(dataset: 'Dataset', config: FiberCrackConfig, func: Callable[..., None]):
     """
     Calls a function that computes and writes data to the dataset.
     Stores the hash of the function's source code as metadata.
     If the function has not changed, it isn't applied to the data.
 
     :param dataset:
-    :param function:
+    :param config:
+    :param func:
     :return:
     """
     # Get a string containing the full function source.
-    sourceLines = inspect.getsourcelines(function)
+    sourceLines = inspect.getsourcelines(func)
     functionSource = ''.join(sourceLines[0])
-    functionName = function.__name__
+    functionName = func.__name__
 
-    callSignature = inspect.signature(function)
+    callSignature = inspect.signature(func)
     callArguments = {}
     for callParameter in callSignature.parameters:
-        if callParameter in globalParams:
-            callArguments[callParameter] = globalParams[callParameter]
+        if callParameter in config.__dict__:
+            callArguments[callParameter] = config.__dict__[callParameter]
 
     callArgumentsString = ''.join([key + str(callArguments[key]) for key in sorted(callArguments)])
 
     attrName = '_functionHash_' + functionName
     currentHash = hashlib.sha1((functionSource + callArgumentsString).encode('utf-8')).hexdigest()
 
-    if 'cameraImageVar' in dataset.get_header() and not recomputeResults:
+    if 'cameraImageVar' in dataset.get_header() and not config.recomputeResults:
         oldHash = dataset.get_attr(attrName) if dataset.has_attr(attrName) else None
 
         if currentHash == oldHash:
@@ -234,39 +176,39 @@ def apply_function_if_code_changed(dataset: 'Dataset', function: Callable[..., N
     print("Applying function {} to the dataset.".format(functionName))
 
     callArguments['dataset'] = dataset
-    function(**callArguments)
+    func(**callArguments)
 
     dataset.set_attr(attrName, currentHash)
 
 
-def compute_and_append_results(dataset: 'Dataset'):
+def compute_and_append_results(dataset: 'Dataset', config: FiberCrackConfig):
     # Compute derived parameters.
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
-    dicKernelRadius = int((dataConfig.dicKernelSize - 1) / 2 / mappingStep[0])
-    textureKernelMultipliers = globalParams['allTextureKernelMultipliers']
-    globalParams['dicKernelRadius'] = dicKernelRadius
-    globalParams['textureKernelSize'] = int(dicKernelRadius * globalParams['textureKernelMultiplier'])
-    globalParams['allTextureKernelSizes'] = [int(dicKernelRadius * mult) for mult in textureKernelMultipliers]
+    dicKernelRadius = int((config.dataConfig.dicKernelSize - 1) / 2 / mappingStep[0])
+    textureKernelMultipliers = config.__dict__['allTextureKernelMultipliers']
+    config.__dict__['dicKernelRadius']       = dicKernelRadius
+    config.__dict__['textureKernelSize']     = int(dicKernelRadius * config.__dict__['textureKernelMultiplier'])
+    config.__dict__['allTextureKernelSizes'] = [int(dicKernelRadius * mult) for mult in textureKernelMultipliers]
 
-    apply_function_if_code_changed(dataset, data_augmentation.append_texture_features)
+    apply_function_if_code_changed(dataset, config, data_augmentation.append_texture_features)
 
-    apply_function_if_code_changed(dataset, crack_detection.append_crack_from_tracking_loss)
-    apply_function_if_code_changed(dataset, crack_detection.append_crack_from_unmatched_pixels)
+    apply_function_if_code_changed(dataset, config, crack_detection.append_crack_from_tracking_loss)
+    apply_function_if_code_changed(dataset, config, crack_detection.append_crack_from_unmatched_pixels)
 
-    apply_function_if_code_changed(dataset, crack_detection.append_crack_from_variance)
-    apply_function_if_code_changed(dataset, crack_detection.append_crack_from_entropy)
+    apply_function_if_code_changed(dataset, config, crack_detection.append_crack_from_variance)
+    apply_function_if_code_changed(dataset, config, crack_detection.append_crack_from_entropy)
 
-    apply_function_if_code_changed(dataset, crack_detection.append_crack_from_unmatched_and_entropy)
-    apply_function_if_code_changed(dataset, crack_detection.append_reference_frame_crack)
+    apply_function_if_code_changed(dataset, config, crack_detection.append_crack_from_unmatched_and_entropy)
+    apply_function_if_code_changed(dataset, config, crack_detection.append_reference_frame_crack)
 
-    apply_function_if_code_changed(dataset, crack_prediction.append_crack_prediction_simple)
-    apply_function_if_code_changed(dataset, crack_prediction.append_crack_prediction_spatial)
+    apply_function_if_code_changed(dataset, config, crack_prediction.append_crack_prediction_simple)
+    apply_function_if_code_changed(dataset, config, crack_prediction.append_crack_prediction_spatial)
 
     # todo this runs always, because there are too many dependencies.
     crack_metrics.append_estimated_crack_area(dataset)
 
 
-def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
+def plot_frame_data_figures(dataset: 'Dataset', config: FiberCrackConfig, targetFrame=None):
 
     # figures = [plt.figure(dpi=300) for i in range(figureNumber)]
     # axes = [fig.add_subplot(1, 1, 1) for fig in figures]
@@ -305,7 +247,7 @@ def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
         # labels[12:len(labels3)] = labels3
         # labels[20:len(labels4)] = labels4
 
-        figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
+        figuresDir = os.path.join(config.outDir, 'figures-{}'.format(config.dataConfig.metadataFilename))
         if not os.path.exists(figuresDir):
             os.makedirs(figuresDir)
 
@@ -326,8 +268,8 @@ def plot_frame_data_figures(dataset: 'Dataset', targetFrame=None):
             ax.clear()
 
 
-def plot_crack_area_figures(dataset: 'Dataset'):
-    figuresDir = os.path.join(outDir, 'figures-{}'.format(dataConfig.metadataFilename))
+def plot_crack_area_figures(dataset: 'Dataset', config: FiberCrackConfig):
+    figuresDir = os.path.join(config.outDir, 'figures-{}'.format(config.dataConfig.metadataFilename))
     if not os.path.exists(figuresDir):
         os.makedirs(figuresDir)
 
@@ -335,16 +277,17 @@ def plot_crack_area_figures(dataset: 'Dataset'):
     fig.savefig(os.path.join(figuresDir, 'crack-area'), dpi=300)
 
 
-def plot_figures(dataset: 'Dataset', frame=None):
-    plot_crack_area_figures(dataset)
-    plot_frame_data_figures(dataset, frame)
+def plot_figures(dataset: 'Dataset', config: FiberCrackConfig, frame=None):
+    plot_crack_area_figures(dataset, config)
+    plot_frame_data_figures(dataset, config, frame)
 
 
-def plot_to_pdf(dataset: 'Dataset', plotFrameFunction: Callable[[Callable[[str], plt.Axes], np.ndarray, List[str]], None]):
+def plot_to_pdf(dataset: 'Dataset', config: FiberCrackConfig,
+                plotFrameFunction: Callable[[Callable[[str], plt.Axes], np.ndarray, List[str]], None]):
     h5Data, header, frameMap, *r = dataset.unpack_vars()
 
     # Prepare for plotting
-    pdfPath = os.path.join(outDir, 'fiber-crack.pdf')
+    pdfPath = os.path.join(config.outDir, 'fiber-crack.pdf')
     print("Plotting to {}".format(pdfPath))
     pdf = PdfPages(pdfPath)
 
@@ -422,17 +365,18 @@ def plot_optic_flow(dataset: 'Dataset'):
     plt.show()
 
 
-def export_crack_volume(dataset: 'Dataset'):
+def export_crack_volume(dataset: 'Dataset', config: FiberCrackConfig):
     """
     Build a volume by concatenating crack areas from each frame,
     save to the disk in datraw format.
     :param dataset:
+    :param config:
     :return:
     """
     frameSize = dataset.get_frame_size()
 
-    framesToSkip = globalParams['exportedVolumeSkippedFrames']
-    frameWidth = globalParams['exportedVolumeTimestepWidth']
+    framesToSkip = config.exportedVolumeSkippedFrames
+    frameWidth = config.exportedVolumeTimestepWidth
     frameNumber = dataset.get_frame_number() - framesToSkip
     # The volume should be exported in Z,Y,X,C with C-order.
     volume = np.zeros((frameNumber * frameWidth, frameSize[1], frameSize[0], 4), dtype=np.uint8)
@@ -442,8 +386,8 @@ def export_crack_volume(dataset: 'Dataset'):
     #                           if area > 0 and dataset.get_metadata_val(i, 'hasCameraImage'))
 
     strain = dataset.get_metadata_column('Strain (%)')
-    minStrain = globalParams['exportedVolumeStrainMin']
-    maxStrain = globalParams['exportedVolumeStrainMax']
+    minStrain = config.exportedVolumeStrainMin
+    maxStrain = config.exportedVolumeStrainMax
 
     colorMap = plt.get_cmap('plasma')
 
@@ -462,7 +406,7 @@ def export_crack_volume(dataset: 'Dataset'):
         volumeSlabSelector = slice_along_axis(slice(f * frameWidth, f * frameWidth + frameWidth), 0, volume.ndim)
         volume[volumeSlabSelector] = crackAreaUint8.swapaxes(0, 1)
 
-    write_volume_to_datraw(np.flip(volume, 0), os.path.join(outDir, 'crack-volume.raw'))
+    write_volume_to_datraw(np.flip(volume, 0), os.path.join(config.outDir, 'crack-volume.raw'))
 
     # Export the color mapping legend.
     fig = plt.figure(figsize=(4, 1))
@@ -472,10 +416,10 @@ def export_crack_volume(dataset: 'Dataset'):
     colorBar = mpl.colorbar.ColorbarBase(ax, cmap=colorMap, norm=norm, orientation='horizontal')
     colorBar.set_label('Strain (%)')
 
-    fig.savefig(os.path.join(outDir, 'crack-volume-legend.png'))
+    fig.savefig(os.path.join(config.outDir, 'crack-volume-legend.png'))
 
 
-def export_displacement_volume(dataset: 'Dataset'):
+def export_displacement_volume(dataset: 'Dataset', config: FiberCrackConfig):
     frameSize = dataset.get_frame_size()
 
     frameNumber = dataset.get_frame_number()
@@ -505,24 +449,25 @@ def export_displacement_volume(dataset: 'Dataset'):
         for y in range(volume.shape[2]):
             volume[f, 0, y, :][sigma[:, y] < 0] = 0  # Set to zero areas with no tracking.
 
-    volumeDir = os.path.join(outDir, os.path.basename(dataConfig.metadataFilename))
+    volumeDir = os.path.join(config.outDir, os.path.basename(config.dataConfig.metadataFilename))
     write_volume_sequence(volumeDir, volume, clip=(0, 255), dtype=np.uint8)
 
 
-def export_crack_propagation(dataset: 'Dataset'):
+def export_crack_propagation(dataset: 'Dataset', config: FiberCrackConfig):
     """
     Export data required for crack propagation comparison into an HDF file.\
     :param dataset:
+    :param config:
     :return:
     """
 
     # Create the output dir.
-    crackDataDir = os.path.join(outDir, 'crack-propagation')
+    crackDataDir = os.path.join(config.outDir, 'crack-propagation')
     if not os.path.exists(crackDataDir):
         os.makedirs(crackDataDir)
 
     # Remove the old file, if exists.
-    crackDataFilePath = os.path.join(crackDataDir, 'crack-propagation_{}.hdf'.format(dataConfig.metadataFilename))
+    crackDataFilePath = os.path.join(crackDataDir, 'crack-propagation_{}.hdf'.format(config.dataConfig.metadataFilename))
     if os.path.exists(crackDataFilePath):
         os.remove(crackDataFilePath)
 
@@ -542,54 +487,74 @@ def export_crack_propagation(dataset: 'Dataset'):
     h5File.close()
 
 
-def main():
-
+def fiber_crack_run(command: str, config: FiberCrackConfig, frame: int = None):
     # Define which commands are possible.
     commandMap = {
-        'plot': lambda: plot_to_pdf(dataset, plot_crack_extraction_view),
-        'export-crack-volume': lambda: export_crack_volume(dataset),
-        'export-displacement-volume': lambda: export_displacement_volume(dataset),
+        'plot': lambda: plot_to_pdf(dataset, config, plot_crack_extraction_view),
+        'export-crack-volume': lambda: export_crack_volume(dataset, config),
+        'export-displacement-volume': lambda: export_displacement_volume(dataset, config),
         'optic-flow': lambda: plot_optic_flow(dataset),
-        'export-figures': lambda: plot_figures(dataset, frame),
-        'export-crack-propagation': lambda: export_crack_propagation(dataset),
-        'plot-prediction': lambda: plot_to_pdf(dataset, plot_crack_prediction_view)
+        'export-figures': lambda: plot_figures(dataset, config, frame),
+        'export-crack-propagation': lambda: export_crack_propagation(dataset, config),
+        'plot-prediction': lambda: plot_to_pdf(dataset, config, plot_crack_prediction_view)
     }
-
-    # Parse the arguments.
-    parser = argparse.ArgumentParser('Fiber crack.')
-    parser.add_argument('-c', '--command', default='plot', choices=commandMap.keys())
-    parser.add_argument('-f', '--frame', default=None, type=int)
-    args = parser.parse_args()
-
+    
     timeStart = time.time()
     print("Loading the data.")
-    dataset = load_data()
-    print("Data loaded in {:.3f} s. Shape: {} Columns: {}".format(time.time() - timeStart, dataset.h5Data.shape, dataset.get_header()))
+    dataset = load_data(config)
+    print("Data loaded in {:.3f} s. Shape: {} Columns: {}".format(time.time() - timeStart, dataset.h5Data.shape,
+                                                                  dataset.get_header()))
     print("Data attributes: {}".format(dataset.get_all_attrs()))
-
     timeStart = time.time()
     print("Augmenting the data.")
-    augment_data(dataset)
+    augment_data(dataset, config)
     print("Data augmented in {:.3f} s.".format(time.time() - timeStart))
-
     timeStart = time.time()
-    compute_and_append_results(dataset)
+    compute_and_append_results(dataset, config)
     print("Results computed and appended in {:.3f} s.".format(time.time() - timeStart))
-
     timeStart = time.time()
-    print("Executing command: {}".format(args.command))
-    frame = args.frame if 'frame' in args.__dict__ else None
-
-    commandMap[args.command]()
+    print("Executing command: {}".format(command))
+    commandMap[command]()
     print("Command executed in {:.3f} s.".format(time.time() - timeStart))
-
     # timeStart = time.time()
     # print("Making a prediction.")
     # predict(dataset: 'Dataset')
     # print("Prediction finished in {:.3f} s.".format(time.time() - timeStart))
-
     # https://github.com/tensorflow/tensorflow/issues/3388
     # keras.backend.clear_session()
+
+
+def main():
+    commandList = [
+        'plot',
+        'export-crack-volume',
+        'export-displacement-volume',
+        'optic-flow',
+        'export-figures',
+        'export-crack-propagation',
+        'plot-prediction',
+    ]
+    
+    # Parse the arguments.
+    parser = argparse.ArgumentParser('Fiber crack.')
+    parser.add_argument('-c', '--command', default='plot', choices=commandList)
+    parser.add_argument('-g', '--config', required=True, type=str)
+    parser.add_argument('-f', '--frame', default=None, type=int)
+    args = parser.parse_args()
+
+    configPath = args.config
+    config = FiberCrackConfig()
+    config.read_from_file(configPath)
+
+    # todo: Seems that I had a bug, always using the same wrong DIC kernel size value.
+    #       For consistency, I'm keeping it this way for now, but in the future, I should remove this
+    #       and adjust the 'hybridKernelMultiplier' to compensate for the change.
+    #       Also, possibly, need to remove the '+1' in the DIC compensation iterations.
+    config.dataConfig.dicKernelSize = 55
+
+    fiber_crack_run(args.command,
+                    config,
+                    args.frame if 'frame' in args.__dict__ else None)
 
 
 main()

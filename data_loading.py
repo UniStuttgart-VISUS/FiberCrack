@@ -53,6 +53,13 @@ class DataImportConfig:
         self.reloadOriginalData = reloadOriginalData
         self.maxFrames = maxFrames
 
+    def load_from_dict(self, configDict):
+        for key, value in configDict.items():
+            if key in self.__dict__:
+                self.__dict__[key] = value
+            else:
+                raise RuntimeError("Unknown data-import config parameter: '{}'".format(key))
+
 
 def load_csv_data(config: 'DataImportConfig'):
     if config.preloadedDataFilename is None:
