@@ -21,6 +21,18 @@ __all__ = ['append_crack_from_tracking_loss',
            'append_reference_frame_crack']
 
 
+def _binary_erosion_repeated(data, selem, repetitions):
+    for i in range(repetitions):
+        data = skimage.morphology.binary_erosion(data, selem)
+    return data
+
+
+def _binary_dilation_repeated(data, selem, repetitions):
+    for i in range(repetitions):
+        data = skimage.morphology.binary_dilation(data, selem)
+    return data
+
+
 def append_crack_from_tracking_loss(dataset: 'Dataset'):
     """
     The most primitive crack estimation (not even close): if the pixel in reference frame
@@ -42,7 +54,11 @@ def append_crack_from_tracking_loss(dataset: 'Dataset'):
         dataset.h5Data[frameIndex, :, :, newColumnIndex] = (sigma < 0)
 
 
-def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius, unmatchedPixelsPadding):
+def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius,
+                                       unmatchedPixelsPadding: float,
+                                       unmatchedPixelsMorphologyDepth: int,
+                                       unmatchedPixelsObjectsThreshold: float,
+                                       unmatchedPixelsHolesThreshold: float):
     """
     Detect the crack pixels based on which pixels haven't been 'matched to'
     from the reference frame. These pixels have 'appeared out of nowhere' and
@@ -50,6 +66,10 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius, unma
 
     :param dataset:
     :param dicKernelRadius:
+    :param unmatchedPixelsPadding:
+    :param unmatchedPixelsMorphologyDepth:
+    :param unmatchedPixelsObjectsThreshold:
+    :param unmatchedPixelsHolesThreshold:
     :return:
     """
     frameWidth, frameHeight = dataset.get_frame_size()
@@ -97,24 +117,22 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius, unma
             cropSelector = (slice(int(frameWidth * unmatchedPixelsPadding), int(frameWidth * unmatchedPixelsPadding)),
                             slice(int(frameHeight * unmatchedPixelsPadding), int(frameHeight * unmatchedPixelsPadding)))
             holePixelNumber = np.count_nonzero(tempResult[cropSelector] == False)
-            tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
+            tempResult = skimage.morphology.remove_small_holes(tempResult,
+                                                               min_size=holePixelNumber * unmatchedPixelsHolesThreshold)
 
-            tempResult = skimage.morphology.binary_erosion(tempResult, selem)
-            tempResult = skimage.morphology.binary_erosion(tempResult, selem)
+            tempResult = _binary_erosion_repeated(tempResult, selem, unmatchedPixelsMorphologyDepth)
             tempResult = skimage.morphology.remove_small_objects(tempResult, min_size=maxObjectSize)
-            tempResult = skimage.morphology.binary_dilation(tempResult, selem)
-            tempResult = skimage.morphology.binary_dilation(tempResult, selem)
+            tempResult = _binary_dilation_repeated(tempResult, selem, unmatchedPixelsMorphologyDepth)
             matchedPixelsObjectsRemoved = tempResult.copy()
-            tempResult = skimage.morphology.binary_dilation(tempResult, selem)
-            tempResult = skimage.morphology.binary_dilation(tempResult, selem)
-            tempResult = skimage.morphology.remove_small_holes(tempResult, min_size=holePixelNumber / 6.0)
-
+            tempResult = _binary_dilation_repeated(tempResult, selem, unmatchedPixelsMorphologyDepth)
+            tempResult = skimage.morphology.remove_small_holes(tempResult,
+                                                               min_size=holePixelNumber * unmatchedPixelsHolesThreshold)
             matchedPixelsHolesRemoved = tempResult.copy()
 
             # Don't erode back: instead, compensate for the kernel used during DIC.
-            currentDilation = 2  # Because we dilated twice without eroding back.
-            for i in range(currentDilation, dicKernelRadius + 1):
-                tempResult = skimage.morphology.binary_dilation(tempResult, selem)
+            currentDilation = unmatchedPixelsMorphologyDepth  # Because we just dilated.
+            assert currentDilation <= dicKernelRadius + 1     # Make sure we didn't dilate too far clearing the noise.
+            tempResult = _binary_dilation_repeated(tempResult, selem, dicKernelRadius + 1 - currentDilation)
 
             matchedPixelsCrack = tempResult == 0.0
 
@@ -205,8 +223,8 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
         dataset.h5Data[frameIndex, ..., index3] = entropyFiltered
 
 
-def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSize, unmatchedAndEntropyKernelMultiplier,
-                                            entropyThreshold, unmatchedPixelsPadding=0.1):
+def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSize, hybridKernelMultiplier,
+                                            entropyThreshold, hybridDilationDepth: int, unmatchedPixelsPadding=0.1):
     """
     Detect crack pixels based on both the local entropy filtering and
     unmatched pixels.
@@ -217,8 +235,9 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
 
     :param dataset:
     :param textureKernelSize:
-    :param unmatchedAndEntropyKernelMultiplier:
+    :param hybridKernelMultiplier:
     :param entropyThreshold:
+    :param hybridDilationDepth:
     :param unmatchedPixelsPadding:
     :return:
     """
@@ -227,7 +246,7 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
 
     frameWidth, frameHeight = dataset.get_frame_size()
     # Use a smaller entropy kernel size, since we narrow the search area using unmatched pixels.
-    entropyFilterRadius = int(textureKernelSize * unmatchedAndEntropyKernelMultiplier)
+    entropyFilterRadius = int(textureKernelSize * hybridKernelMultiplier)
 
     index1 = dataset.create_or_get_column('hybridUnmatchedDilated')
     index2 = dataset.create_or_get_column('hybridEntropyBinary')
@@ -236,31 +255,27 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, :, :, :]
         # Fetch the unmatched pixels (where matched pixels == 0).
-        unmathedPixels = frameData[..., header.index('matchedPixelsHolesRemoved')]  == 0
+        unmatchedPixels = frameData[..., header.index('matchedPixelsHolesRemoved')]  == 0
 
         # Manually remove the unmatched pixels that are pushing into the image from the sides.
         if unmatchedPixelsPadding > 0.0:
             paddingWidth = int(frameWidth * unmatchedPixelsPadding)
-            unmathedPixels[:paddingWidth, :] = False
-            unmathedPixels[-paddingWidth:, :] = False
+            unmatchedPixels[:paddingWidth, :] = False
+            unmatchedPixels[-paddingWidth:, :] = False
 
         # Dilate the unmatched pixels crack, and later use it as a search filter.
-        unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
-        unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
-        unmathedPixels = skimage.morphology.binary_dilation(unmathedPixels, selem)
-
-        unmatchedDilated = unmathedPixels.copy()
+        unmatchedPixels = _binary_dilation_repeated(unmatchedPixels, selem, hybridDilationDepth)
+        unmatchedDilated = unmatchedPixels.copy()
 
         # todo reuse entropy code (copy-pasting right now), but note that we might need a different kernel size.
         imageEntropy = image_processing.image_entropy_filter(frameData[..., header.index('camera')], int(entropyFilterRadius))
         entropyBinary = imageEntropy < entropyThreshold  # type: np.ndarray
 
         entropyFiltered = entropyBinary.copy()
-        for i in range(0, math.ceil(entropyFilterRadius / 2.0)):
-            entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
+        entropyFiltered = _binary_dilation_repeated(entropyFiltered, selem, int(math.ceil(entropyFilterRadius / 2.0)))
 
         # Crack = low entropy near unmatched pixels.
-        cracks = np.logical_and(unmathedPixels, entropyFiltered)
+        cracks = np.logical_and(unmatchedPixels, entropyFiltered)
 
         dataset.h5Data[frameIndex, ..., index1] = unmatchedDilated
         dataset.h5Data[frameIndex, ..., index2] = entropyBinary

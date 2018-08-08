@@ -9,8 +9,6 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numpy as np
 import h5py
-import scipy.ndimage.morphology
-import scipy.stats
 from matplotlib.backends.backend_pdf import PdfPages
 
 import FiberCrack.crack_detection as crack_detection
@@ -20,8 +18,6 @@ import FiberCrack.data_augmentation as data_augmentation
 import FiberCrack.data_loading as data_loading
 import FiberCrack.plotting as plotting
 from FiberCrack.Dataset import Dataset
-
-import FiberCrack.image_processing as image_processing
 
 from PythonExtras.numpy_extras import slice_along_axis
 from PythonExtras.volume_tools import write_volume_to_datraw, write_volume_sequence
@@ -45,15 +41,22 @@ recomputeResults = False
 
 outDir = 'T:/out/fiber-crack'
 
-dicKernelSize = 55
+dataConfig.dicKernelSize = 55
 
 globalParams = {
     'textureKernelMultiplier': 1.0,
     'entropyThreshold': 1.0,
     'varianceThreshold': 0.003,
+
     'unmatchedPixelsPadding': 0.15,
+    'unmatchedPixelsMorphologyDepth': 2,         # How many dilations/erosions are used before removing objects/holes.
+    'unmatchedPixelsObjectsThreshold': 1 / 50,   # Fraction of the image area.
+    'unmatchedPixelsHolesThreshold': 1 / 6,      # Fraction of the zero-valued image area (sclaes with the crack).
+
+    'hybridKernelMultiplier': 0.5,
+    'hybridDilationDepth': 3,                    # How many dilations are applied to expand the 'search range'.
+
     'sigmaSkeletonPadding': 0.15,
-    'unmatchedAndEntropyKernelMultiplier': 0.5,
     'exportedVolumeTimestepWidth': 3,
     'exportedVolumeGradientWidth': 3,
     'exportedVolumeSkippedFrames': 5,
@@ -80,7 +83,7 @@ globalParams = {
 # dataConfig.dicKernelSize = 85
 # dataConfig.preloadedDataFilename = 'Steel-Epoxy-low-t-res.hdf5'
 # # globalParams['exportedVolumeSkippedFrames'] = 15
-# globalParams['unmatchedAndEntropyKernelMultiplier'] = 0.75
+# globalParams['hybridKernelMultiplier'] = 0.75
 # globalParams['exportedVolumeSkippedFrames'] = 4
 
 # basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
@@ -129,6 +132,11 @@ dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
 # metadataFilename = ''
 # preloadedDataFilename = 'micro_epoxy-hole'
 
+# todo: Seems that I had a bug, always using the same wrong DIC kernel size value.
+#       For consistency, I'm keeping it this way for now, but in the future, I should remove this
+#       and adjust the 'hybridKernelMultiplier' to compensate for the change.
+#       Also, possibly, need to remove the '+1' in the DIC compensation iterations.
+dataConfig.dicKernelSize = 55
 
 #############################################
 
@@ -234,7 +242,7 @@ def apply_function_if_code_changed(dataset: 'Dataset', function: Callable[..., N
 def compute_and_append_results(dataset: 'Dataset'):
     # Compute derived parameters.
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
-    dicKernelRadius = int((dicKernelSize - 1) / 2 / mappingStep[0])
+    dicKernelRadius = int((dataConfig.dicKernelSize - 1) / 2 / mappingStep[0])
     textureKernelMultipliers = globalParams['allTextureKernelMultipliers']
     globalParams['dicKernelRadius'] = dicKernelRadius
     globalParams['textureKernelSize'] = int(dicKernelRadius * globalParams['textureKernelMultiplier'])
