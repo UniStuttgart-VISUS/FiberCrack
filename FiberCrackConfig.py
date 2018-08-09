@@ -47,6 +47,8 @@ class FiberCrackConfig:
         self.allTextureKernelMultipliers = [2.0, 1.5, 1.0, 0.5, 0.25] 
         self.textureFilters = ['entropy', 'variance']
 
+        self.enablePrediction = True
+
     def read_from_file(self, path: str):
         print("Reading FiberCrack config at '{}'".format(path))
         with open(path, 'r') as file:

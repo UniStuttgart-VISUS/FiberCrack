@@ -201,8 +201,9 @@ def compute_and_append_results(dataset: 'Dataset', config: FiberCrackConfig):
     apply_function_if_code_changed(dataset, config, crack_detection.append_crack_from_unmatched_and_entropy)
     apply_function_if_code_changed(dataset, config, crack_detection.append_reference_frame_crack)
 
-    apply_function_if_code_changed(dataset, config, crack_prediction.append_crack_prediction_simple)
-    apply_function_if_code_changed(dataset, config, crack_prediction.append_crack_prediction_spatial)
+    if config.enablePrediction:
+        apply_function_if_code_changed(dataset, config, crack_prediction.append_crack_prediction_simple)
+        apply_function_if_code_changed(dataset, config, crack_prediction.append_crack_prediction_spatial)
 
     # todo this runs always, because there are too many dependencies.
     crack_metrics.append_estimated_crack_area(dataset)
@@ -266,6 +267,10 @@ def plot_frame_data_figures(dataset: 'Dataset', config: FiberCrackConfig, target
 
         for ax in axes:
             ax.clear()
+
+    # Cleanup, since pyplot doesn't do it automatically.
+    for fig in figures:
+        plt.close(fig)
 
 
 def plot_crack_area_figures(dataset: 'Dataset', config: FiberCrackConfig):
@@ -495,6 +500,7 @@ def fiber_crack_run(command: str, config: FiberCrackConfig, frame: int = None):
         'export-displacement-volume': lambda: export_displacement_volume(dataset, config),
         'optic-flow': lambda: plot_optic_flow(dataset),
         'export-figures': lambda: plot_figures(dataset, config, frame),
+        'export-figures-only-area': lambda: plot_crack_area_figures(dataset, config),
         'export-crack-propagation': lambda: export_crack_propagation(dataset, config),
         'plot-prediction': lambda: plot_to_pdf(dataset, config, plot_crack_prediction_view)
     }
@@ -531,6 +537,7 @@ def main():
         'export-displacement-volume',
         'optic-flow',
         'export-figures',
+        'export-figures-only-area',
         'export-crack-propagation',
         'plot-prediction',
     ]
@@ -557,4 +564,6 @@ def main():
                     args.frame if 'frame' in args.__dict__ else None)
 
 
-main()
+if __name__ == '__main__':
+    main()
+
