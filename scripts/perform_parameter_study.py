@@ -33,7 +33,7 @@ def main():
                 os.makedirs(config.outDir)
 
             print("Starting the run '{}'".format(outDirName))
-            fiber_crack_run('export-figures', config)
+            fiber_crack_run('export-figures-only-area', config)
 
 
 main()
