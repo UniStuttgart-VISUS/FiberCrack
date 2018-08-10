@@ -252,7 +252,7 @@ def plot_crack_area_chart(dataset: 'Dataset', csvOutPath: str=None):
     crackAreaFeatures = dataset.get_str_array_attr('crackAreaNames')
     crackAreaFeaturesShort = dataset.get_str_array_attr('crackAreaNamesShort')
 
-    featuresToPlot = ['unmatchedAndEntropy', 'trackingLoss']
+    featuresToPlot = ['hybrid', 'entropy', 'unmatchedPixels', 'trackingLoss']
 
     for i, name in enumerate(crackAreaFeatures):
         shortName = crackAreaFeaturesShort[i]
@@ -261,7 +261,7 @@ def plot_crack_area_chart(dataset: 'Dataset', csvOutPath: str=None):
 
         crackArea = dataset.get_metadata_column(name + 'Physical')
         if name != 'crackAreaGroundTruth':
-            ax.plot(crackArea, label='Estimated', linewidth=1.0)
+            ax.plot(crackArea, label='Est. ({})'.format(shortName), linewidth=1.0)
 
             result.append(crackArea)
             resultHeader.append(name + 'Physical')
@@ -306,7 +306,7 @@ def plot_crack_area_chart(dataset: 'Dataset', csvOutPath: str=None):
 
         ax.bar([0], [0], color='g', alpha=0.5, label='Percentage error')  # Empty series, just for legend.
 
-        ax.legend(loc=0)
+        ax.legend(loc=0, fontsize='x-small')
         ax.set_ylim(bottom=0)
 
         # Plot the percentage error on the second Y-axis.

@@ -386,7 +386,7 @@ def export_crack_volume(dataset: 'Dataset', config: FiberCrackConfig):
     # The volume should be exported in Z,Y,X,C with C-order.
     volume = np.zeros((frameNumber * frameWidth, frameSize[1], frameSize[0], 4), dtype=np.uint8)
 
-    # crackAreaMeasured = dataset.get_metadata_column('crackAreaUnmatchedAndEntropy')
+    # crackAreaMeasured = dataset.get_metadata_column('crackAreaHybrid')
     # firstNonEmptyFrame = next(i for i, area in enumerate(crackAreaMeasured.tolist())
     #                           if area > 0 and dataset.get_metadata_val(i, 'hasCameraImage'))
 

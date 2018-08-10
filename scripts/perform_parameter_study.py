@@ -1,3 +1,4 @@
+import time
 import os
 
 import numpy as np
@@ -32,8 +33,9 @@ def main():
             if not os.path.exists(config.outDir):
                 os.makedirs(config.outDir)
 
-            print("Starting the run '{}'".format(outDirName))
-            fiber_crack_run('export-figures-only-area', config)
+            print("[{}] Starting the run '{}'".format(time.strftime('%d.%m.%y %H:%M:%S'), outDirName))
+            # fiber_crack_run('export-figures-only-area', config)
+            fiber_crack_run('export-figures', config, frame=3330)
 
 
 main()

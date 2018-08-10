@@ -27,7 +27,7 @@ def append_estimated_crack_area(dataset: 'Dataset'):
         'matchedPixelsCrack': 'unmatchedPixels',
         'cameraImageVarFiltered': 'variance',
         'cameraImageEntropyFiltered': 'entropy',
-        'hybridCracks': 'unmatchedAndEntropy',
+        'hybridCracks': 'hybrid',
         'crackPredictionBinary': 'predictionSimple',
         'crackPredictionSpatialBinary': 'predictionSpatial',
 
