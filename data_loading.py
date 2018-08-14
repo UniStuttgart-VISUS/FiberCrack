@@ -14,7 +14,7 @@ import skimage.util
 from PIL import Image
 
 from FiberCrack.Dataset import Dataset
-from PythonExtras.data_loading import read_csv_data, read_tiff_data
+from PythonExtras.common_data_tools import read_csv_data, read_tiff_data
 
 __all__ = ['DataImportConfig', 'load_csv_data', 'load_tiff_data']
 

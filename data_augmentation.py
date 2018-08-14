@@ -14,7 +14,7 @@ import skimage.util
 from FiberCrack.Dataset import Dataset
 from FiberCrack.data_loading import DataImportConfig
 import FiberCrack.image_processing as image_processing
-from PythonExtras.data_loading import read_csv_data
+from PythonExtras.common_data_tools import read_csv_data
 
 __all__ = ['append_camera_image', 'append_ground_truth_image', 'append_matched_pixels',
            'zero_pixels_without_tracking', 'append_data_image_mapping', 'append_physical_frame_size',
