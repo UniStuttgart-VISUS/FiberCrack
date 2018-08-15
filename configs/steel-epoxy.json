@@ -11,5 +11,6 @@
         "preloadedDataFilename": "Steel-Epoxy-low-t-res.hdf5"
     },
     "exportedVolumeSkippedFrames": 4,
-    "hybridKernelMultiplier": 0.75
+    "hybridKernelMultiplier": 0.75,
+    "enablePrediction": false
 }

@@ -110,7 +110,7 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius,
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore')
 
-            maxObjectSize = int(frameWidth * frameHeight / 50)
+            maxObjectSize = int(frameWidth * frameHeight * unmatchedPixelsObjectsThreshold)
             tempResult = skimage.morphology.remove_small_objects(
                 matchedPixelsGaussThres.astype(np.bool), min_size=maxObjectSize)
 

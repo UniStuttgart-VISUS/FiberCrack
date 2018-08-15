@@ -10,6 +10,7 @@
         "imageBaseName" : "Spec048",
         "dicKernelSize" : 81,
         "crackAreaGroundTruthPath" : "spec_048_area.csv"
-    }
-
+    },
+    "unmatchedPixelsPadding": 0.1,
+    "enablePrediction": false
 }

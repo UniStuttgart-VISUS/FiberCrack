@@ -2,22 +2,38 @@ import time
 import os
 
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 from FiberCrack.FiberCrackConfig import FiberCrackConfig
 from FiberCrack.fiber_crack import fiber_crack_run
 
+import PythonExtras.common_data_tools as common_data_tools
+import PythonExtras.pyplot_extras as pyplot_extras
 
-def main():
+
+def perform_parameter_analysis():
 
     rootOutDirPath = 'T:\\out\\fiber-crack\\parameter-study'
-    baseConfigPath = '..\\configs\\ptfe-epoxy.json'
+    # baseConfigPath = '..\\configs\\ptfe-epoxy.json'
+    baseConfigPath = '..\\configs\\steel-epoxy.json'
     parameterAxes = {
         'unmatchedPixelsMorphologyDepth': [0, 1, 2, 3, 4],
         'unmatchedPixelsObjectsThreshold': 1 / np.asarray([10, 25, 50, 75, 100]),
-        'unmatchedPixelsHolesThreshold': 1 / np.asarray([1, 3, 6, 9, 12]),
-        'hybridKernelMultiplier':  [0.1, 0.25, 0.5, 1.0],
-        'hybridDilationDepth': [1, 3, 5]
+        'unmatchedPixelsHolesThreshold': 1 / np.asarray([0.1, 1, 3, 6, 9, 12, 20]),
+        # 'hybridKernelMultiplier':  [0.1, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0],
+        'hybridKernelMultiplier':  [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0],
+        'hybridDilationDepth': [1, 3, 5, 7, 9, 11, 15]
     }
+
+    runExperiments = False
+
+    baseConfig = FiberCrackConfig()
+    baseConfig.read_from_file(baseConfigPath)
+    datasetName = os.path.splitext(baseConfig.dataConfig.metadataFilename)[0]
+    pdfPath = os.path.join(rootOutDirPath, '{}.pdf'.format(datasetName))
+    print("Plotting to {}".format(pdfPath))
+    pdf = PdfPages(pdfPath)
 
     for axisParam, valueRange in parameterAxes.items():
         config = FiberCrackConfig()
@@ -26,6 +42,13 @@ def main():
         config.enablePrediction = False  # We don't need the prediction, save the time.
         config.recomputeResults = True   # The _results_ caching in FiberCrack is working poorly and should be avoided.
 
+        crackAreas = []
+        frameIndices = None
+        frameNumbers = None
+
+        figure = plt.figure(dpi=300)
+        ax = figure.add_subplot(1, 1, 1)
+
         for i, value in enumerate(valueRange):
             config.__dict__[axisParam] = value
             outDirName = '{}_{}_{:02d}_{}'.format(config.dataConfig.metadataFilename, axisParam, i, value)
@@ -33,9 +56,40 @@ def main():
             if not os.path.exists(config.outDir):
                 os.makedirs(config.outDir)
 
-            print("[{}] Starting the run '{}'".format(time.strftime('%d.%m.%y %H:%M:%S'), outDirName))
-            # fiber_crack_run('export-figures-only-area', config)
-            fiber_crack_run('export-figures', config, frame=3330)
+            if runExperiments:
+                print("[{}] Starting the run '{}'".format(time.strftime('%d.%m.%y %H:%M:%S'), outDirName))
+                # fiber_crack_run('export-figures-only-area', config)
+                fiber_crack_run('export-figures', config, frame=3330)
+            elif not os.path.exists(config.outDir):
+                raise RuntimeError("Results dir is missing: '{}'".format(config.outDir))
+
+            resultsSubdir = 'figures-{}'.format(config.dataConfig.metadataFilename)
+            csvFilePath = os.path.join(config.outDir, resultsSubdir, 'crack-area-data.csv')
+
+            csvData, csvHeader = common_data_tools.read_csv_data(csvFilePath)
+            crackAreas.append(csvData[:, csvHeader.index('crackAreaHybridPhysical')])
+
+            if frameNumbers is None:
+                frameIndices = csvData[:, csvHeader.index('frameIndex')]
+                frameNumbers = csvData[:, csvHeader.index('frameNumber')]
+
+            ax.plot(frameNumbers, crackAreas[-1], label='{}-{:.3f}'.format(axisParam, value), lw=0.5)
+
+        exportedHeader = ['frameIndex', 'frameNumber', *['{}-{}'.format(axisParam, val) for val in valueRange]]
+        exportedData = np.vstack((frameIndices, frameNumbers, *crackAreas)).transpose()
+
+        exportedCsvFilepath = os.path.join(rootOutDirPath, '{}-{}.csv'.format(datasetName, axisParam))
+
+        # noinspection PyTypeChecker
+        np.savetxt(exportedCsvFilepath, exportedData,
+                   fmt='%.6f', delimiter='\t',
+                   header='\t'.join(exportedHeader), comments='', encoding='utf-8')
+
+        ax.legend()
+        pdf.savefig(figure)
+        plt.close(figure)
+
+    pdf.close()
 
 
-main()
+perform_parameter_analysis()
