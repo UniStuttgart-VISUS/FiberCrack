@@ -21,12 +21,13 @@ def perform_parameter_analysis():
         'unmatchedPixelsMorphologyDepth': [0, 1, 2, 3, 4],
         'unmatchedPixelsObjectsThreshold': 1 / np.asarray([10, 25, 50, 75, 100]),
         'unmatchedPixelsHolesThreshold': 1 / np.asarray([0.1, 1, 3, 6, 9, 12, 20]),
-        # 'hybridKernelMultiplier':  [0.1, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0],
         'hybridKernelMultiplier':  [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0],
-        'hybridDilationDepth': [1, 3, 5, 7, 9, 11, 15]
+        'hybridDilationDepth': [0, 1, 3, 5, 7]
     }
 
-    runExperiments = False
+    # frameToExport = 3330
+    frameToExport = 1150
+    runExperiments = True
 
     baseConfig = FiberCrackConfig()
     baseConfig.read_from_file(baseConfigPath)
@@ -68,12 +69,20 @@ def perform_parameter_analysis():
 
             csvData, csvHeader = common_data_tools.read_csv_data(csvFilePath)
             crackAreas.append(csvData[:, csvHeader.index('crackAreaHybridPhysical')])
+            dicCrackArea = csvData[:, csvHeader.index('crackAreaUnmatchedPixelsPhysical')]
 
             if frameNumbers is None:
                 frameIndices = csvData[:, csvHeader.index('frameIndex')]
                 frameNumbers = csvData[:, csvHeader.index('frameNumber')]
 
-            ax.plot(frameNumbers, crackAreas[-1], label='{}-{:.3f}'.format(axisParam, value), lw=0.5)
+            ax.plot(frameNumbers, crackAreas[-1],
+                    label='{}-{:.3f}'.format(axisParam, value), lw=0.5)
+            ax.plot(frameNumbers, dicCrackArea,
+                    label='{}-{:.3f}-DIC'.format(axisParam, value), lw=0.5, linestyle='dashed')
+
+            if 'crackAreaGroundTruthAverage' in csvHeader:
+                groundTruth = csvData[:, csvHeader.index('crackAreaGroundTruthAverage')]
+                ax.scatter(frameNumbers[groundTruth != 0], groundTruth[groundTruth != 0], marker='x')
 
         exportedHeader = ['frameIndex', 'frameNumber', *['{}-{}'.format(axisParam, val) for val in valueRange]]
         exportedData = np.vstack((frameIndices, frameNumbers, *crackAreas)).transpose()

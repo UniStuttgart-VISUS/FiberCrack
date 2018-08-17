@@ -255,7 +255,8 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
     for frameIndex in range(0, dataset.get_frame_number()):
         frameData = dataset.h5Data[frameIndex, :, :, :]
         # Fetch the unmatched pixels (where matched pixels == 0).
-        unmatchedPixels = frameData[..., header.index('matchedPixelsHolesRemoved')]  == 0
+        # unmatchedPixels = frameData[..., header.index('matchedPixelsHolesRemoved')]  == 0
+        unmatchedPixels = frameData[..., header.index('matchedPixelsCrack')]  != 0
 
         # Manually remove the unmatched pixels that are pushing into the image from the sides.
         if unmatchedPixelsPadding > 0.0:
