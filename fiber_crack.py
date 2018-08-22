@@ -557,6 +557,8 @@ def main():
     #       For consistency, I'm keeping it this way for now, but in the future, I should remove this
     #       and adjust the 'hybridKernelMultiplier' to compensate for the change.
     #       Also, possibly, need to remove the '+1' in the DIC compensation iterations.
+    #
+    #       Also check perform_parameter_study.py.
     config.dataConfig.dicKernelSize = 55
 
     fiber_crack_run(args.command,

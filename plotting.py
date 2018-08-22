@@ -238,6 +238,8 @@ def plot_crack_area_chart(dataset: 'Dataset', csvOutPath: str=None):
     resultHeader.append('frameIndex')
     result.append(frameMap)
     resultHeader.append('frameNumber')
+    result.append(dataset.get_metadata_column('Strain (%)'))
+    resultHeader.append('strainPercent')
 
     fig = plt.figure()
     fig.set_size_inches(4, 3)

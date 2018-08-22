@@ -1,5 +1,6 @@
 import time
 import os
+import itertools
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,19 +16,30 @@ import PythonExtras.pyplot_extras as pyplot_extras
 def perform_parameter_analysis():
 
     rootOutDirPath = 'T:\\out\\fiber-crack\\parameter-study'
-    # baseConfigPath = '..\\configs\\ptfe-epoxy.json'
-    baseConfigPath = '..\\configs\\steel-epoxy.json'
+    paperOutDirPath = 'T:\\projects\\papers\\MontrealGeneral\\Papers\\Applied\\figures'
+
+    baseConfigPath = '..\\configs\\ptfe-epoxy.json'
+    frameToExport = 3330
+
+    # baseConfigPath = '..\\configs\\steel-epoxy.json'
+    # frameToExport = 1150
+
     parameterAxes = {
         'unmatchedPixelsMorphologyDepth': [0, 1, 2, 3, 4],
-        'unmatchedPixelsObjectsThreshold': 1 / np.asarray([10, 25, 50, 75, 100]),
-        'unmatchedPixelsHolesThreshold': 1 / np.asarray([0.1, 1, 3, 6, 9, 12, 20]),
+        # 'unmatchedPixelsObjectsThreshold': 1 / np.asarray([10, 25, 50, 75, 100]),
+        # 'unmatchedPixelsHolesThreshold': 1 / np.asarray([0.1, 1, 3, 6, 9, 12, 20]),
         'hybridKernelMultiplier':  [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0],
         'hybridDilationDepth': [0, 1, 3, 5, 7]
     }
+    chosenValues = {
+        'unmatchedPixelsMorphologyDepth': 3,
+        'hybridKernelMultiplier': 0.4,
+        'hybridDilationDepth': 3
+    }
+    # todo This is hardcoded, unfortunately. Because the DIC kernel was hardcoded in the original code.
+    # textureKernelRadius = 4
 
-    # frameToExport = 3330
-    frameToExport = 1150
-    runExperiments = True
+    runExperiments = False
 
     baseConfig = FiberCrackConfig()
     baseConfig.read_from_file(baseConfigPath)
@@ -43,9 +55,12 @@ def perform_parameter_analysis():
         config.enablePrediction = False  # We don't need the prediction, save the time.
         config.recomputeResults = True   # The _results_ caching in FiberCrack is working poorly and should be avoided.
 
-        crackAreas = []
+        crackAreasHybrid = []
+        crackAreasDic = []
         frameIndices = None
         frameNumbers = None
+        strainValues = None
+        groundTruth = None
 
         figure = plt.figure(dpi=300)
         ax = figure.add_subplot(1, 1, 1)
@@ -68,35 +83,78 @@ def perform_parameter_analysis():
             csvFilePath = os.path.join(config.outDir, resultsSubdir, 'crack-area-data.csv')
 
             csvData, csvHeader = common_data_tools.read_csv_data(csvFilePath)
-            crackAreas.append(csvData[:, csvHeader.index('crackAreaHybridPhysical')])
-            dicCrackArea = csvData[:, csvHeader.index('crackAreaUnmatchedPixelsPhysical')]
+            crackAreasHybrid.append(csvData[:, csvHeader.index('crackAreaHybridPhysical')].copy())
+            crackAreasDic.append(csvData[:, csvHeader.index('crackAreaUnmatchedPixelsPhysical')].copy())
 
             if frameNumbers is None:
                 frameIndices = csvData[:, csvHeader.index('frameIndex')]
                 frameNumbers = csvData[:, csvHeader.index('frameNumber')]
+                strainValues = csvData[:, csvHeader.index('strainPercent')]
 
-            ax.plot(frameNumbers, crackAreas[-1],
+            ax.plot(strainValues, crackAreasHybrid[-1],
                     label='{}-{:.3f}'.format(axisParam, value), lw=0.5)
-            ax.plot(frameNumbers, dicCrackArea,
+            ax.plot(strainValues, crackAreasDic[-1],
                     label='{}-{:.3f}-DIC'.format(axisParam, value), lw=0.5, linestyle='dashed')
 
             if 'crackAreaGroundTruthAverage' in csvHeader:
                 groundTruth = csvData[:, csvHeader.index('crackAreaGroundTruthAverage')]
-                ax.scatter(frameNumbers[groundTruth != 0], groundTruth[groundTruth != 0], marker='x')
-
-        exportedHeader = ['frameIndex', 'frameNumber', *['{}-{}'.format(axisParam, val) for val in valueRange]]
-        exportedData = np.vstack((frameIndices, frameNumbers, *crackAreas)).transpose()
-
-        exportedCsvFilepath = os.path.join(rootOutDirPath, '{}-{}.csv'.format(datasetName, axisParam))
-
-        # noinspection PyTypeChecker
-        np.savetxt(exportedCsvFilepath, exportedData,
-                   fmt='%.6f', delimiter='\t',
-                   header='\t'.join(exportedHeader), comments='', encoding='utf-8')
+                ax.scatter(strainValues[groundTruth != 0], groundTruth[groundTruth != 0], marker='x')
 
         ax.legend()
         pdf.savefig(figure)
         plt.close(figure)
+
+        exportedHeader = ['frameIndex', 'frameNumber', 'strainPercent',
+                          *['{}-{:.3f}-{}'.format(axisParam, val, crackType) for crackType, val in
+                            itertools.product(['hybrid', 'dic'], valueRange)]
+                          ]
+        # Check that the ordering is correct.
+        assert exportedHeader[-2] == '{}-{:.3f}-{}'.format(axisParam, valueRange[-2], 'dic')
+
+        arraysToStack = (frameIndices, frameNumbers, strainValues, *crackAreasHybrid, *crackAreasDic)
+        if groundTruth is not None:
+            arraysToStack += (np.ma.array(groundTruth, mask=(groundTruth == 0)),)
+            exportedHeader += ['manualMean']
+
+        exportedData = np.ma.vstack(arraysToStack).transpose()
+        exportedCsvFilepath = os.path.join(rootOutDirPath, 'param-study-{}-{}.csv'.format(datasetName, axisParam))
+
+        common_data_tools.write_to_csv(exportedCsvFilepath, exportedData, exportedHeader, addPaddingColumn=True)
+
+        # Export groundTruth into a separate CSV.
+        common_data_tools.write_to_csv(
+            os.path.join(rootOutDirPath, 'manual-measurement-{}.csv'.format(datasetName)),
+            np.vstack((frameNumbers[groundTruth != 0],
+                       strainValues[groundTruth != 0],
+                       groundTruth[groundTruth != 0])).transpose(),
+            ['frameNumber', 'strainPercent', 'manualMean']
+        )
+
+        # Draw a rough parameter study figure.
+        parameterPdf = PdfPages(os.path.join(paperOutDirPath, 'param-study-{}-{}.pdf'.format(datasetName, axisParam)))
+        figure = plt.figure(dpi=300, figsize=(4, 3))
+        ax = figure.add_subplot(1, 1, 1)
+
+        plotDic = axisParam == 'unmatchedPixelsMorphologyDepth'
+        areasToPlot = crackAreasDic if plotDic else crackAreasHybrid
+        for i, area in enumerate(areasToPlot):
+            formatTemplate = 'Estimated (DIC), {}' if plotDic else 'Estimated, {}'
+            chosen = chosenValues[axisParam]
+            lineStyle = 'solid' if valueRange[i] == chosen else 'dashed'
+            ax.plot(strainValues, area,
+                    label=formatTemplate.format(valueRange[i]), lw=0.75, linestyle=lineStyle)
+
+        ax.scatter(strainValues[groundTruth != 0], groundTruth[groundTruth != 0], marker='x', label='Measured')
+
+        ax.set_ylim(0.0, 6.0)
+        ax.set_ylabel("Crack area [mm^2]")
+        ax.set_xlabel("Strain [%]")
+        ax.legend()
+        figure.tight_layout()
+
+        parameterPdf.savefig(figure)
+        plt.close(figure)
+        parameterPdf.close()
 
     pdf.close()
 
