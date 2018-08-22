@@ -78,7 +78,7 @@ def load_csv_data(config: 'DataImportConfig'):
         originalFeatureNumber = None
 
         # Load the metadata, describing each frame of the experiment.
-        metadata, metaheader = read_csv_data(path.join(config.basePath, config.metadataFilename))
+        metadata, metaheader = read_csv_data(path.join(config.basePath, config.metadataFilename), delimiter=',')
 
         dataFilenameList = os.listdir(path.join(config.basePath, config.dataDir))
         frameNumber = min(len(dataFilenameList), config.maxFrames)
@@ -95,7 +95,7 @@ def load_csv_data(config: 'DataImportConfig'):
                 break
 
             filepath = path.join(config.basePath, config.dataDir, filename)
-            frameData, frameHeader = read_csv_data(filepath)
+            frameData, frameHeader = read_csv_data(filepath, delimiter=',')
 
             # Figure out the size of the frame.
             # Count its width by finding where the value of 'y' changes the first time.
