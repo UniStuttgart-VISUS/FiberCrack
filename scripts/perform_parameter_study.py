@@ -25,21 +25,23 @@ def perform_parameter_analysis():
     # frameToExport = 1150
 
     parameterAxes = {
-        'unmatchedPixelsMorphologyDepth': [0, 1, 2, 3, 4],
-        # 'unmatchedPixelsObjectsThreshold': 1 / np.asarray([10, 25, 50, 75, 100]),
-        # 'unmatchedPixelsHolesThreshold': 1 / np.asarray([0.1, 1, 3, 6, 9, 12, 20]),
-        'hybridKernelMultiplier':  [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0],
-        'hybridDilationDepth': [0, 1, 3, 5, 7]
+        # 'unmatchedPixelsMorphologyDepth': [0, 1, 2, 3, 4],
+        ### 'unmatchedPixelsObjectsThreshold': 1 / np.asarray([10, 25, 50, 75, 100]),
+        ### 'unmatchedPixelsHolesThreshold': 1 / np.asarray([0.1, 1, 3, 6, 9, 12, 20]),
+        # 'hybridKernelMultiplier':  [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0],
+        # 'hybridDilationDepth': [0, 1, 3, 5, 7],
+        'entropyThreshold': [0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
     }
     chosenValues = {
         'unmatchedPixelsMorphologyDepth': 3,
         'hybridKernelMultiplier': 0.4,
-        'hybridDilationDepth': 3
+        'hybridDilationDepth': 3,
+        'entropyThreshold': 1.0
     }
     # todo This is hardcoded, unfortunately. Because the DIC kernel was hardcoded in the original code.
     # textureKernelRadius = 4
 
-    runExperiments = False
+    runExperiments = True
 
     baseConfig = FiberCrackConfig()
     baseConfig.read_from_file(baseConfigPath)
@@ -67,7 +69,7 @@ def perform_parameter_analysis():
 
         for i, value in enumerate(valueRange):
             config.__dict__[axisParam] = value
-            outDirName = '{}_{}_{:02d}_{}'.format(config.dataConfig.metadataFilename, axisParam, i, value)
+            outDirName = '{}_{}_{}'.format(config.dataConfig.metadataFilename, axisParam, value)
             config.outDir = os.path.join(rootOutDirPath, outDirName)
             if not os.path.exists(config.outDir):
                 os.makedirs(config.outDir)
@@ -82,7 +84,7 @@ def perform_parameter_analysis():
             resultsSubdir = 'figures-{}'.format(config.dataConfig.metadataFilename)
             csvFilePath = os.path.join(config.outDir, resultsSubdir, 'crack-area-data.csv')
 
-            csvData, csvHeader = common_data_tools.read_csv_data(csvFilePath)
+            csvData, csvHeader = common_data_tools.read_csv_data(csvFilePath, delimiter=',')
             crackAreasHybrid.append(csvData[:, csvHeader.index('crackAreaHybridPhysical')].copy())
             crackAreasDic.append(csvData[:, csvHeader.index('crackAreaUnmatchedPixelsPhysical')].copy())
 
@@ -98,6 +100,18 @@ def perform_parameter_analysis():
 
             if 'crackAreaGroundTruthAverage' in csvHeader:
                 groundTruth = csvData[:, csvHeader.index('crackAreaGroundTruthAverage')]
+
+            # For Steel-Epoxy there's no ground truth images, just a small csv with scalars.
+            if datasetName == 'SteelEpoxy.csv':
+                groundTruthCsvPath = 'T:\\data\\montreal-full\\Experiments\\Steel-Epoxy\\Steel_measured_Ilyass.csv'
+                csvData, csvHeader = common_data_tools.read_csv_data(groundTruthCsvPath, delimiter=';')
+                truthSparse = csvData[:, (csvHeader.index('Strain'), csvHeader.index('Average'))]
+                # Convert from the sparse representation into a dense one, fill in with zeros.
+                groundTruth = np.zeros_like(strainValues)
+                for strain, truthValue in truthSparse:
+                    groundTruth[np.argwhere(strainValues == strain)] = truthValue
+
+            if groundTruth is not None:
                 ax.scatter(strainValues[groundTruth != 0], groundTruth[groundTruth != 0], marker='x')
 
         ax.legend()
