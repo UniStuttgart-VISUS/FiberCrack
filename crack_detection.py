@@ -314,7 +314,7 @@ def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius, sigmaSkele
 
         # Erode the cracks to remove smaller noise.
         selem = scipy.ndimage.morphology.generate_binary_structure(binarySigma.ndim, 2)
-        for i in range(0, math.ceil(dicKernelRadius / 2)):
+        for i in range(0, int(math.ceil(dicKernelRadius / 2))):
             binarySigmaFiltered = skimage.morphology.binary_erosion(binarySigmaFiltered, selem)
 
         # Remove tiny disconnected chunks of cracks as unnecessary noise.
@@ -326,7 +326,8 @@ def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius, sigmaSkele
         binarySigmaSkeleton = skimage.morphology.skeletonize(binarySigmaFiltered)
 
         # Prune the skeleton from small branches.
-        binarySigmaSkeletonPruned = image_processing.image_morphology_prune(binarySigmaSkeleton, int(frameSize[0] / 100))
+        pruningIterationNumber = int(math.ceil(dicKernelRadius / 2))
+        binarySigmaSkeletonPruned = image_processing.image_morphology_prune(binarySigmaSkeleton, pruningIterationNumber)
 
         dataset.h5Data[frameIndex, ..., index1] = binarySigmaFiltered
         dataset.h5Data[frameIndex, ..., index2] = binarySigmaSkeleton
