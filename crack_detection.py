@@ -11,8 +11,8 @@ import skimage.morphology
 import skimage.transform
 import skimage.util
 
-from FiberCrack.Dataset import Dataset
-import FiberCrack.image_processing as image_processing
+from Dataset import Dataset
+import image_processing as image_processing
 
 
 __all__ = ['append_crack_from_tracking_loss',

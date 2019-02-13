@@ -1,4 +1,3 @@
-import math
 import os.path as path
 import os
 import warnings
@@ -8,97 +7,7 @@ import gzip
 from typing import Union, Callable, Tuple, List, Dict, Any
 
 import numpy as np
-import scipy.ndimage
-import scipy.misc
 import h5py
-
-import PythonExtras.numpy_extras as numpy_extras
-from PythonExtras.CppWrapper import CppWrapper
-
-
-def downsample_volume_sequence(inputDatPath, outputDatPath, outputShape, printFn=None):
-    inputData = load_volume_data_from_dat(inputDatPath, printFn=None)
-
-    filename, extension = os.path.splitext(os.path.basename(outputDatPath))
-    dirPath = os.path.join(os.path.dirname(outputDatPath), filename)
-    if not os.path.exists(dirPath):
-        os.makedirs(dirPath)
-
-    for f in range(0, inputData.shape[0]):
-        if printFn:
-            printFn("Downsampling frame {}/{}".format(f, inputData.shape[0]))
-
-        outputFrame = downsample_volume(inputData[f, ...], outputShape)
-        filepath = os.path.join(dirPath, '{:06d}.raw'.format(f))
-        outputFrame.tofile(filepath)
-
-    _write_metadata_to_dat(outputDatPath, outputShape, filename, inputData.dtype)
-
-
-def resize_array_point(data, outputSize):
-    """
-    Resizes an Nd array using point (nearest neighboor sampling).
-    :param data:
-    :param outputSize:
-    :return:
-    """
-
-    # output = np.empty(outputSize, dtype=data.dtype)
-    #
-    # inputSizeArr = np.asarray(data.shape) - 1
-    # outputSizeArr = np.asarray(outputSize) - 1
-    # inputIndex = np.empty(data.ndim, dtype=np.int)
-    # for outputIndex in np.ndindex(outputSize):
-    #     # Compute a coordinate for each axis.
-    #     for j in range(0, data.ndim):
-    #         t = outputIndex[j] / outputSizeArr[j]
-    #         inputIndex[j] = int(t * inputSizeArr[j] + 0.5)
-    #     output[outputIndex] = data[tuple(inputIndex)]
-    #
-    # return output
-
-    return CppWrapper.resize_array_point(data, outputSize)
-
-
-def downsample_volume(data, outputSize):
-    inputSize = data.shape
-
-    if inputSize == outputSize:
-        return data
-
-    assert(data.ndim == 3)
-    assert(data.ndim == len(outputSize))
-
-    resizeRatio = max(np.asarray(inputSize) / np.asarray(outputSize))
-
-    kernelRadius = int(math.ceil(resizeRatio / 2))
-    kernelWidth = 2 * kernelRadius + 1
-
-    # Fit full Gaussian into the kernel.
-    sigma = kernelWidth / 6.0
-
-    # Precompute kernel values. No scaling constant, since we normalize anyway.
-    kernel = np.zeros(kernelWidth)
-    kernel[kernelRadius] = 1.0  # middle
-    sigmaSqr = sigma ** 2
-    sum = 1.0
-    for i in range(1, kernelRadius + 1):
-        w = math.exp(-0.5 * float(i ** 2) / sigmaSqr)
-        kernel[kernelRadius + i] = w
-        kernel[kernelRadius - i] = w
-        sum += 2.0 * w
-
-    for i in range(0, kernelWidth):
-        kernel[i] /= sum
-
-    input = data
-    output = None
-    for axis in range(0, data.ndim):
-        output = scipy.ndimage.convolve1d(input, kernel, axis=axis, mode='mirror')
-        if axis != data.ndim - 1:
-            input = output.copy()
-
-    return resize_array_point(output, outputSize)
 
 
 def load_volume_data_from_dat(datPath,

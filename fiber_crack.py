@@ -6,81 +6,33 @@ import time
 from typing import Callable, List
 
 import matplotlib.pyplot as plt
-import matplotlib.patches
 import matplotlib as mpl
 import numpy as np
 import h5py
 from matplotlib.backends.backend_pdf import PdfPages
-import skimage.transform
 
-import FiberCrack.crack_detection as crack_detection
-import FiberCrack.crack_prediction as crack_prediction
-import FiberCrack.crack_metrics as crack_metrics
-import FiberCrack.data_augmentation as data_augmentation
-import FiberCrack.data_loading as data_loading
-import FiberCrack.plotting as plotting
-from FiberCrack.Dataset import Dataset
-from FiberCrack.FiberCrackConfig import FiberCrackConfig
+import crack_detection as crack_detection
+import crack_metrics as crack_metrics
+import data_augmentation as data_augmentation
+import data_loading as data_loading
+import plotting as plotting
+from Dataset import Dataset
+from FiberCrackConfig import FiberCrackConfig
 
-from PythonExtras.numpy_extras import slice_along_axis
 from PythonExtras.volume_tools import write_volume_to_datraw, write_volume_sequence
 
 np.random.seed(13)  # Fix the seed for reproducibility.
-# import tensorflow as tf
-# tf.set_random_seed(13)
-
-############### Configuration ###############
 
 
-# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-Epoxy'
-# metadataFilename = 'Steel-Epoxy.csv'
-# dataDir = 'data_export_tstep3'
-# imageDir = 'raw_images'
-# imageBaseName = 'Spec054'
-# dicKernelSize = 85
-
-# Steel-Epoxy dataset. We are comparing crack progression between this one and PTFE-Epoxy.
-# -- Moved to steel-epoxy.json
-
-# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Steel-ModifiedEpoxy'
-# metadataFilename = 'Steel-ModifiedEpoxy.csv'
-# dataDir = 'data_export'
-# imageDir = 'raw_images'
-# imageBaseName = 'Spec010'
-# dicKernelSize = 55
-
-# The cleanest dataset: PTFE with epoxy.
-# -- Moved to ptfe-epoxy.json
-
-# Older, different experiments.
-# dataConfig.basePath = '//visus/visusstore/share/Mehr Daten/Rissausbreitung/Montreal/Experiments/20151125-Spec012'
-# dataConfig.metadataFilename = '20152411-Spec012.csv'
-# dataConfig.dataDir = 'export'
-# # dataConfig.dataDir = 'data_export_fine'
-# dataConfig.imageDir = ''
-# dataConfig.imageBaseName = '20152411-Spec012'
-# dataConfig.dicKernelSize = 81
-# dataConfig.crackAreaGroundTruthPath = 'spec_048_area.csv'
-
-# # PTFE-Epoxy with fine spatial and temporal resolutions, mid-experiment.
-# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/Spec48'
-# metadataFilename = '../PTFE-Epoxy/PTFE-Epoxy.csv'
-# dataDir = 'data_grid_sparse_filtered'
-# imageDir = '../PTFE-Epoxy/raw_images'
-# imageBaseName = 'Spec048'
-# preloadedDataFilename = 'PTFE-Epoxy-fine-mid.hdf5'
-# dicKernelSize = 81
-
-# dataFormat = 'tiff'
-# basePath = '//visus/visusstore/share/Daten/Sonstige/Montreal/Experiments/micro_epoxy-hole'
-# dataDir = ''
-# imageDir = ''
-# imageBaseName = 'test'
-# imageFilenameFormat = '{}_{:03d}.bmp'
-# metadataFilename = ''
-# preloadedDataFilename = 'micro_epoxy-hole'
-
-#############################################
+def slice_along_axis(index, axis, ndim):
+    """
+    Return a selector that takes a single-element slice (subtensor) of an nd-array
+    along a certain axis (at a given index).
+    The result would be an (n-1)-dimensional array. E.g. data[:, :, 5, :].
+    The advantage of this function over subscript syntax is that you can
+    specify the axis with a variable.
+    """
+    return tuple([index if axis == i else None for i in range(0, ndim)])
 
 
 def load_data(config: FiberCrackConfig):
@@ -193,14 +145,6 @@ def compute_and_append_results(dataset: 'Dataset', config: FiberCrackConfig):
     config.hybridKernelSize      = int(dicKernelRadius * config.hybridKernelMultiplier)
     config.allTextureKernelSizes = [int(dicKernelRadius * mult) for mult in textureKernelMultipliers]
 
-    # todo debug only
-    # print("DEBUG: dic raw: {} dic: {} texture: {} hybrid: {} mult: {}".format(
-    #     config.dataConfig.dicKernelSize,
-    #     dicKernelRadius,
-    #     config.textureKernelSize,
-    #     config.hybridKernelSize,
-    #     config.hybridKernelMultiplier))
-
     apply_function_if_code_changed(dataset, config, data_augmentation.append_texture_features)
 
     apply_function_if_code_changed(dataset, config, crack_detection.append_crack_from_tracking_loss)
@@ -211,10 +155,6 @@ def compute_and_append_results(dataset: 'Dataset', config: FiberCrackConfig):
 
     apply_function_if_code_changed(dataset, config, crack_detection.append_crack_from_unmatched_and_entropy)
     apply_function_if_code_changed(dataset, config, crack_detection.append_reference_frame_crack)
-
-    if config.enablePrediction:
-        apply_function_if_code_changed(dataset, config, crack_prediction.append_crack_prediction_simple)
-        apply_function_if_code_changed(dataset, config, crack_prediction.append_crack_prediction_spatial)
 
     # todo this runs always, because there are too many dependencies.
     crack_metrics.append_estimated_crack_area(dataset)
@@ -533,12 +473,6 @@ def fiber_crack_run(command: str, config: FiberCrackConfig, frame: int = None):
     print("Executing command: {}".format(command))
     commandMap[command]()
     print("Command executed in {:.3f} s.".format(time.time() - timeStart))
-    # timeStart = time.time()
-    # print("Making a prediction.")
-    # predict(dataset: 'Dataset')
-    # print("Prediction finished in {:.3f} s.".format(time.time() - timeStart))
-    # https://github.com/tensorflow/tensorflow/issues/3388
-    # keras.backend.clear_session()
 
 
 def main():
@@ -555,6 +489,8 @@ def main():
     
     # Parse the arguments.
     parser = argparse.ArgumentParser('Fiber crack.')
+    parser.add_argument('-d', '--data-path', required=True, type=str)
+    parser.add_argument('-p', '--preloaded-path', required=True, type=str)
     parser.add_argument('-c', '--command', default='plot', choices=commandList)
     parser.add_argument('-g', '--config', required=True, type=str)
     parser.add_argument('-f', '--frame', default=None, type=int)
@@ -564,6 +500,9 @@ def main():
     config = FiberCrackConfig()
     config.read_from_file(configPath)
 
+    # Prepend the paths passed at runtime to the configuration file.
+    config.dataConfig.basePath = os.path.join(args.data_path, config.dataConfig.basePath)
+    config.dataConfig.preloadedDataDir = args.preloaded_path
 
     fiber_crack_run(args.command,
                     config,

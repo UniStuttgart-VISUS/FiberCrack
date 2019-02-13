@@ -2,7 +2,7 @@
     "description": "Steel-Epoxy dataset. We are comparing crack progression between this one and PTFE-Epoxy.",
     "dataConfig":
     {
-        "basePath" : "T:\\data\\montreal-full\\Experiments\\Steel-Epoxy",
+        "basePath" : "Steel-Epoxy",
         "metadataFilename" : "Steel-Epoxy.csv",
         "dataDir" : "data_export",
         "imageDir" : "raw_images",
@@ -11,6 +11,5 @@
         "preloadedDataFilename": "Steel-Epoxy-low-t-res.hdf5"
     },
     "exportedVolumeSkippedFrames": 4,
-    "hybridKernelMultiplier": 0.75,
-    "enablePrediction": false
+    "hybridKernelMultiplier": 0.6
 }

@@ -11,9 +11,9 @@ import skimage.morphology
 import skimage.transform
 import skimage.util
 
-from FiberCrack.Dataset import Dataset
-from FiberCrack.data_loading import DataImportConfig
-import FiberCrack.image_processing as image_processing
+from Dataset import Dataset
+from data_loading import DataImportConfig
+import image_processing as image_processing
 from PythonExtras.common_data_tools import read_csv_data
 
 __all__ = ['append_camera_image', 'append_ground_truth_image', 'append_matched_pixels',

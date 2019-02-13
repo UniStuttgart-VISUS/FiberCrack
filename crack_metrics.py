@@ -1,7 +1,7 @@
 import typing
 import numpy as np
 
-import FiberCrack.Dataset as Dataset
+import Dataset as Dataset
 
 
 __all__ = ['append_estimated_crack_area']

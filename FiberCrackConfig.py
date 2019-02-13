@@ -1,7 +1,7 @@
 import json
 
 
-import FiberCrack.data_loading as data_loading
+import data_loading as data_loading
 
 
 class FiberCrackConfig:
@@ -11,7 +11,9 @@ class FiberCrackConfig:
         self.description = "Default config description."
         
         self.dataConfig = data_loading.DataImportConfig()
-        self.dataConfig.preloadedDataDir = 'C:/preloaded_data'
+        # Path to a temporary storage, where loaded data will be stored as a single HDF array for future use.
+        # This makes running the tools much faster than loading the data every time from scratch.
+        self.dataConfig.preloadedDataDir = ''
         self.dataConfig.preloadedDataFilename = None  # By default, decide automatically.
         self.dataConfig.dataFormat = 'csv'
         self.dataConfig.imageFilenameFormat = '{}-{:04d}_0.tif'
@@ -38,8 +40,6 @@ class FiberCrackConfig:
         self.hybridDilationDepth = 3   # How many dilations are applied to expand the search range.
 
         self.sigmaSkeletonPadding = 0.15 
-
-        self.enablePrediction = True
 
         self.outDir = 'T:/out/fiber-crack'
 

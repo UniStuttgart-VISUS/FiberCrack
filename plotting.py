@@ -16,7 +16,7 @@ import skimage.morphology
 import skimage.transform
 import skimage.util
 
-from FiberCrack.Dataset import Dataset
+from Dataset import Dataset
 
 __all__ = ['plot_original_data_for_frame', 'plot_unmatched_cracks_for_frame',
            'plot_image_cracks_for_frame', 'plot_reference_crack_for_frame',

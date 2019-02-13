@@ -1,8 +1,8 @@
 {
-    "description": "The cleanest dataset: PTFE with epoxy.",
+    "description": "The main dataset: PTFE with epoxy.",
     "dataConfig":
     {
-        "basePath" : "T:\\data\\montreal-full\\Experiments\\PTFE-Epoxy",
+        "basePath" : "PTFE-Epoxy",
         "metadataFilename" : "PTFE-Epoxy.csv",
         "dataDir" : "data_export",
         "imageDir" : "raw_images",
@@ -11,6 +11,5 @@
         "dicKernelSize" : 81,
         "crackAreaGroundTruthPath" : "spec_048_area.csv"
     },
-    "unmatchedPixelsPadding": 0.12,
-    "enablePrediction": false
+    "unmatchedPixelsPadding": 0.12
 }

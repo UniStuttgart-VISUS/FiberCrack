@@ -6,11 +6,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
-from FiberCrack.FiberCrackConfig import FiberCrackConfig
-from FiberCrack.fiber_crack import fiber_crack_run
+from FiberCrackConfig import FiberCrackConfig
+from fiber_crack import fiber_crack_run
 
 import PythonExtras.common_data_tools as common_data_tools
-import PythonExtras.pyplot_extras as pyplot_extras
 
 
 def perform_parameter_analysis():
