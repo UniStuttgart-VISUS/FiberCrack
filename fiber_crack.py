@@ -6,10 +6,12 @@ import time
 from typing import Callable, List
 
 import matplotlib.pyplot as plt
+import matplotlib.patches
 import matplotlib as mpl
 import numpy as np
 import h5py
 from matplotlib.backends.backend_pdf import PdfPages
+import skimage.transform
 
 import FiberCrack.crack_detection as crack_detection
 import FiberCrack.crack_prediction as crack_prediction
@@ -185,10 +187,19 @@ def compute_and_append_results(dataset: 'Dataset', config: FiberCrackConfig):
     # Compute derived parameters.
     mappingMin, mappingMax, mappingStep = dataset.get_data_image_mapping()
     dicKernelRadius = int((config.dataConfig.dicKernelSize - 1) / 2 / mappingStep[0])
-    textureKernelMultipliers = config.__dict__['allTextureKernelMultipliers']
-    config.__dict__['dicKernelRadius']       = dicKernelRadius
-    config.__dict__['textureKernelSize']     = int(dicKernelRadius * config.__dict__['textureKernelMultiplier'])
-    config.__dict__['allTextureKernelSizes'] = [int(dicKernelRadius * mult) for mult in textureKernelMultipliers]
+    textureKernelMultipliers = config.allTextureKernelMultipliers
+    config.dicKernelRadius       = dicKernelRadius
+    config.textureKernelSize     = int(dicKernelRadius * config.textureKernelMultiplier)
+    config.hybridKernelSize      = int(dicKernelRadius * config.hybridKernelMultiplier)
+    config.allTextureKernelSizes = [int(dicKernelRadius * mult) for mult in textureKernelMultipliers]
+
+    # todo debug only
+    # print("DEBUG: dic raw: {} dic: {} texture: {} hybrid: {} mult: {}".format(
+    #     config.dataConfig.dicKernelSize,
+    #     dicKernelRadius,
+    #     config.textureKernelSize,
+    #     config.hybridKernelSize,
+    #     config.hybridKernelMultiplier))
 
     apply_function_if_code_changed(dataset, config, data_augmentation.append_texture_features)
 
@@ -236,8 +247,8 @@ def plot_frame_data_figures(dataset: 'Dataset', config: FiberCrackConfig, target
 
         # Plot the data.
         plotting.plot_original_data_for_frame(axis_builder, frameData, dataset.get_header())
-        plotting.plot_unmatched_cracks_for_frame(axis_builder, frameData, dataset.get_header())
-        plotting.plot_image_cracks_for_frame(axis_builder, frameData, dataset.get_header())
+        plotting.plot_unmatched_cracks_for_frame(axis_builder, frameData, dataset.get_header(), config.magnifiedRegion)
+        plotting.plot_image_cracks_for_frame(axis_builder, frameData, dataset.get_header(), config.magnifiedRegion)
         plotting.plot_reference_crack_for_frame(axis_builder, frameData, dataset.get_header())
 
         # Assign the labels to the axes.
@@ -553,13 +564,6 @@ def main():
     config = FiberCrackConfig()
     config.read_from_file(configPath)
 
-    # todo: Seems that I had a bug, always using the same wrong DIC kernel size value.
-    #       For consistency, I'm keeping it this way for now, but in the future, I should remove this
-    #       and adjust the 'hybridKernelMultiplier' to compensate for the change.
-    #       Also, possibly, need to remove the '+1' in the DIC compensation iterations.
-    #
-    #       Also check perform_parameter_study.py.
-    config.dataConfig.dicKernelSize = 55
 
     fiber_crack_run(args.command,
                     config,

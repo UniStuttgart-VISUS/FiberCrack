@@ -2,10 +2,12 @@ import math
 import colorsys
 import csv
 
-from typing import Callable
+from typing import Callable, Tuple, List, Dict, Any, Union, Type
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+import matplotlib.patches
 import numpy as np
 import skimage.feature
 import skimage.filters
@@ -50,25 +52,34 @@ def color_map_hsv(X, Y, maxNorm):
     return result
 
 
-def plot_contour_overlay(axes, backgroundImage, binaryImage):
+def draw_magnified_region(axNorm, magnifiedRegion):
+    xLim, yLim = axNorm.get_xlim(), axNorm.get_ylim()
+    imageSize = xLim[1] - xLim[0], yLim[1] - yLim[0]
+    axNorm.add_patch(mpl.patches.Rectangle((int(magnifiedRegion[0][0] * imageSize[0]),
+                                            int((1 - magnifiedRegion[1][1]) * imageSize[1])),
+                                           int((magnifiedRegion[0][1] - magnifiedRegion[0][0]) * imageSize[0]),
+                                           int((magnifiedRegion[1][1] - magnifiedRegion[1][0]) * imageSize[1]),
+                                           linewidth=5, edgecolor='r', facecolor='none', zorder=1000))
+
+
+def plot_contour_overlay(axes, backgroundImage, binaryImage, lineWidthFactor: float = 1.0):
     """
     Plots contours over an image background.
-    :param axes:
-    :param backgroundImage:
-    :param binaryImage:
     :return:
     """
     axes.imshow(backgroundImage.transpose(), origin='lower', cmap='gray')
     entropyContours = skimage.measure.find_contours(binaryImage.transpose(), 0.5)
-    lineWidth = axes.get_window_extent().width / 500
+    lineWidth = axes.get_window_extent().width / 500 * lineWidthFactor
     for n, contour in enumerate(entropyContours):
         axes.plot(contour[:, 1], contour[:, 0], linewidth=lineWidth, color='white')
+
+    return axes
 
 
 def plot_original_data_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header):
     """
     Plots raw data for a given frame.
-    :param axisBuilder: 
+    :param axisBuilder:
     :param frameData:
     :param header:
     :return:
@@ -89,11 +100,11 @@ def plot_original_data_for_frame(axisBuilder: Callable[[str], plt.Axes], frameDa
         plot_contour_overlay(axisBuilder('crack-ground-truth'), cameraImage, crackGroundTruth)
 
 
-def plot_unmatched_cracks_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header):
+def plot_unmatched_cracks_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header, magnifiedRegion):
     """
     Plots cracks detected from unmatched pixels, i.e. pixels
     that haven't been 'matched to', for a given frame.
-    :param axisBuilder: 
+    :param axisBuilder:
     :param frameData:
     :param header:
     :return: plot labels
@@ -120,14 +131,13 @@ def plot_unmatched_cracks_for_frame(axisBuilder: Callable[[str], plt.Axes], fram
     matchedPixelsCrack = frameData[..., header.index('matchedPixelsCrack')]
     axisBuilder('matched-pixels-crack-raw').imshow(matchedPixelsCrack.transpose(), origin='lower', cmap='gray')
     plot_contour_overlay(axisBuilder('matched-pixels-crack'), cameraImageData, matchedPixelsCrack)
+    ax = plot_contour_overlay(axisBuilder('matched-pixels-crack-thin'), cameraImageData, matchedPixelsCrack, lineWidthFactor=0.25)
+    draw_magnified_region(ax, magnifiedRegion)
 
 
-def plot_image_cracks_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header):
+def plot_image_cracks_for_frame(axisBuilder: Callable[[str], plt.Axes], frameData: np.ndarray, header, magnifiedRegion):
     """
     Plot crack detected with image-based texture-feature techniques.
-    :param axisBuilder:
-    :param frameData:
-    :param header:
     :return: plot names
     """
     cameraImageData = frameData[..., header.index('camera')]
@@ -158,6 +168,9 @@ def plot_image_cracks_for_frame(axisBuilder: Callable[[str], plt.Axes], frameDat
     axisBuilder('hybrid-entropy-binary').imshow(hybridEntropyBinary.transpose(), origin='lower', cmap='gray')
     plot_contour_overlay(axisBuilder('hybrid-entropy-binary-crack'), cameraImageData, hybridEntropyBinary)
     plot_contour_overlay(axisBuilder('hybrid-crack'), cameraImageData, hybridCracks)
+    ax = plot_contour_overlay(axisBuilder('hybrid-crack-thin'), cameraImageData, hybridCracks, lineWidthFactor=0.25)
+    # Here we only draw a rectangle around the area that should be magnified, and do the magnification externally.
+    draw_magnified_region(ax, magnifiedRegion)
 
     axisBuilder('hybrid-crack-raw').imshow(hybridCracks.transpose(), origin='lower', cmap='gray')
 

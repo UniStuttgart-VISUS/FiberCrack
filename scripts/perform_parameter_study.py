@@ -16,7 +16,7 @@ import PythonExtras.pyplot_extras as pyplot_extras
 def perform_parameter_analysis():
 
     rootOutDirPath = 'T:\\out\\fiber-crack\\parameter-study'
-    paperOutDirPath = 'T:\\projects\\papers\\MontrealGeneral\\Papers\\Applied\\figures'
+    paperOutDirPath = 'T:\\projects\\papers\\MontrealGeneral\\Papers\\Applied\\'
 
     baseConfigPath = '..\\configs\\ptfe-epoxy.json'
     frameToExport = 3330
@@ -28,9 +28,10 @@ def perform_parameter_analysis():
         # 'unmatchedPixelsMorphologyDepth': [0, 1, 2, 3, 4],
         ### 'unmatchedPixelsObjectsThreshold': 1 / np.asarray([10, 25, 50, 75, 100]),
         ### 'unmatchedPixelsHolesThreshold': 1 / np.asarray([0.1, 1, 3, 6, 9, 12, 20]),
-        # 'hybridKernelMultiplier':  [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0],
+        'hybridKernelMultiplier':  [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0],
+        # 'hybridKernelMultiplier': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.9, 1.0],
         # 'hybridDilationDepth': [0, 1, 3, 5, 7],
-        'entropyThreshold': [0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
+        # 'entropyThreshold': [0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
     }
     chosenValues = {
         'unmatchedPixelsMorphologyDepth': 3,
@@ -38,8 +39,6 @@ def perform_parameter_analysis():
         'hybridDilationDepth': 3,
         'entropyThreshold': 1.0
     }
-    # todo This is hardcoded, unfortunately. Because the DIC kernel was hardcoded in the original code.
-    # textureKernelRadius = 4
 
     runExperiments = True
 
@@ -134,6 +133,9 @@ def perform_parameter_analysis():
         exportedCsvFilepath = os.path.join(rootOutDirPath, 'param-study-{}-{}.csv'.format(datasetName, axisParam))
 
         common_data_tools.write_to_csv(exportedCsvFilepath, exportedData, exportedHeader, addPaddingColumn=True)
+        # Write the CSV to the paper as well.
+        paperCsvFilepath = os.path.join(paperOutDirPath, 'data', 'param-study-{}-{}.csv'.format(datasetName, axisParam))
+        common_data_tools.write_to_csv(paperCsvFilepath, exportedData, exportedHeader, addPaddingColumn=True)
 
         # Export groundTruth into a separate CSV.
         common_data_tools.write_to_csv(
@@ -145,7 +147,8 @@ def perform_parameter_analysis():
         )
 
         # Draw a rough parameter study figure.
-        parameterPdf = PdfPages(os.path.join(paperOutDirPath, 'param-study-{}-{}.pdf'.format(datasetName, axisParam)))
+        parameterPdf = PdfPages(os.path.join(rootOutDirPath,
+                                             'param-study-{}-{}.pdf'.format(datasetName, axisParam)))
         figure = plt.figure(dpi=300, figsize=(4, 3))
         ax = figure.add_subplot(1, 1, 1)
 

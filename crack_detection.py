@@ -131,8 +131,8 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius,
 
             # Don't erode back: instead, compensate for the kernel used during DIC.
             currentDilation = unmatchedPixelsMorphologyDepth  # Because we just dilated.
-            assert currentDilation <= dicKernelRadius + 1     # Make sure we didn't dilate too far clearing the noise.
-            tempResult = _binary_dilation_repeated(tempResult, selem, dicKernelRadius + 1 - currentDilation)
+            assert currentDilation <= dicKernelRadius - 1     # Make sure we didn't dilate too far clearing the noise.
+            tempResult = _binary_dilation_repeated(tempResult, selem, dicKernelRadius - 1 - currentDilation)
 
             matchedPixelsCrack = tempResult == 0.0
 
@@ -223,7 +223,7 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
         dataset.h5Data[frameIndex, ..., index3] = entropyFiltered
 
 
-def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSize, hybridKernelMultiplier,
+def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', hybridKernelSize,
                                             entropyThreshold, hybridDilationDepth: int, unmatchedPixelsPadding=0.1):
     """
     Detect crack pixels based on both the local entropy filtering and
@@ -234,8 +234,7 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
     the kernel size for the entropy filter and increase the spatial precision.
 
     :param dataset:
-    :param textureKernelSize:
-    :param hybridKernelMultiplier:
+    :param hybridKernelSize:
     :param entropyThreshold:
     :param hybridDilationDepth:
     :param unmatchedPixelsPadding:
@@ -246,7 +245,7 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', textureKernelSiz
 
     frameWidth, frameHeight = dataset.get_frame_size()
     # Use a smaller entropy kernel size, since we narrow the search area using unmatched pixels.
-    entropyFilterRadius = int(textureKernelSize * hybridKernelMultiplier)
+    entropyFilterRadius = hybridKernelSize
 
     index1 = dataset.create_or_get_column('hybridUnmatchedDilated')
     index2 = dataset.create_or_get_column('hybridEntropyBinary')
@@ -314,7 +313,7 @@ def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius, sigmaSkele
 
         # Erode the cracks to remove smaller noise.
         selem = scipy.ndimage.morphology.generate_binary_structure(binarySigma.ndim, 2)
-        for i in range(0, int(math.ceil(dicKernelRadius / 2))):
+        for i in range(0, int(math.ceil(dicKernelRadius / 2) - 1)):
             binarySigmaFiltered = skimage.morphology.binary_erosion(binarySigmaFiltered, selem)
 
         # Remove tiny disconnected chunks of cracks as unnecessary noise.
@@ -326,7 +325,7 @@ def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius, sigmaSkele
         binarySigmaSkeleton = skimage.morphology.skeletonize(binarySigmaFiltered)
 
         # Prune the skeleton from small branches.
-        pruningIterationNumber = int(math.ceil(dicKernelRadius / 2))
+        pruningIterationNumber = int(math.ceil(dicKernelRadius / 2) - 1)
         binarySigmaSkeletonPruned = image_processing.image_morphology_prune(binarySigmaSkeleton, pruningIterationNumber)
 
         dataset.h5Data[frameIndex, ..., index1] = binarySigmaFiltered

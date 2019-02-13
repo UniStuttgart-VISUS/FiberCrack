@@ -21,11 +21,11 @@ class FiberCrackConfig:
         self.maxFrames = 99999
         self.recomputeResults = False
 
-        self.outDir = 'T:/out/fiber-crack'
-
         self.dataConfig.dicKernelSize = 55
 
-        self.textureKernelMultiplier = 1.0
+        self.allTextureKernelMultipliers = [2.0, 1.5, 1.0, 0.5, 0.25]
+        self.textureFilters = ['entropy', 'variance']
+        self.textureKernelMultiplier = 0.8
         self.entropyThreshold = 1.0 
         self.varianceThreshold = 0.003 
 
@@ -34,20 +34,24 @@ class FiberCrackConfig:
         self.unmatchedPixelsObjectsThreshold = 1 / 50   # Fraction of the image area.
         self.unmatchedPixelsHolesThreshold = 1 / 6   # Fraction of the zero-valued image area (sclaes with the crack).
 
-        self.hybridKernelMultiplier = 0.5 
+        self.hybridKernelMultiplier = 0.4
         self.hybridDilationDepth = 3   # How many dilations are applied to expand the search range.
 
         self.sigmaSkeletonPadding = 0.15 
-        self.exportedVolumeTimestepWidth = 3 
-        self.exportedVolumeGradientWidth = 3 
-        self.exportedVolumeSkippedFrames = 5 
-        self.exportedVolumeStrainMin = 4.0 
-        self.exportedVolumeStrainMax = 7.5 
-
-        self.allTextureKernelMultipliers = [2.0, 1.5, 1.0, 0.5, 0.25] 
-        self.textureFilters = ['entropy', 'variance']
 
         self.enablePrediction = True
+
+        self.outDir = 'T:/out/fiber-crack'
+
+        self.exportedVolumeTimestepWidth = 3
+        self.exportedVolumeGradientWidth = 3
+        self.exportedVolumeSkippedFrames = 5
+        self.exportedVolumeStrainMin = 4.0
+        self.exportedVolumeStrainMax = 7.5
+
+        self.magnifiedFigureNames = ['hybrid-crack-thin', 'matched-pixels-crack-thin']
+        self.magnifiedRegion = ((0.5, 0.7), (0.3, 0.55))
+        self.magnifiedRatio = 2
 
     def read_from_file(self, path: str):
         print("Reading FiberCrack config at '{}'".format(path))
