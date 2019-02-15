@@ -9,7 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 
-crackDataPath = 'T:/projects/SimtechOne/out/fiber/crack-propagation'
+# Path to the results of the 'export-crack-propagation' command.
+crackDataPath = 'PLACEHOLDER-PATH'
 
 datasetNames = ['PTFE-Epoxy.csv', 'Steel-Epoxy.csv']
 datasetShifts = [[0, 0], [-25, -30]]

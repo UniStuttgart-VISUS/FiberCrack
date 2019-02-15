@@ -67,8 +67,6 @@ def load_csv_data(config: 'DataImportConfig'):
     else:
         h5Filename = config.preloadedDataFilename
 
-    h5File = None
-
     preloadedDataPath = path.join(config.preloadedDataDir, h5Filename)
     if config.reloadOriginalData or not path.isfile(preloadedDataPath):
         print('Loading data from CSV files.')
@@ -165,7 +163,6 @@ def load_tiff_data(config: 'DataImportConfig'):
         raise RuntimeError('Preloaded data filename is missing.')
 
     h5Filename = config.preloadedDataFilename
-    h5File = None
 
     preloadedDataPath = path.join(config.preloadedDataDir, h5Filename)
     if config.reloadOriginalData or not path.isfile(preloadedDataPath):

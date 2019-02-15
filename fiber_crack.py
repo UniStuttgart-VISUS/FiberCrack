@@ -141,9 +141,9 @@ def compute_and_append_results(dataset: 'Dataset', config: FiberCrackConfig):
     dicKernelRadius = int((config.dataConfig.dicKernelSize - 1) / 2 / mappingStep[0])
     textureKernelMultipliers = config.allTextureKernelMultipliers
     config.dicKernelRadius       = dicKernelRadius
-    config.textureKernelSize     = int(dicKernelRadius * config.textureKernelMultiplier)
-    config.hybridKernelSize      = int(dicKernelRadius * config.hybridKernelMultiplier)
-    config.allTextureKernelSizes = [int(dicKernelRadius * mult) for mult in textureKernelMultipliers]
+    config.textureKernelRadius   = int(dicKernelRadius * config.textureKernelMultiplier)
+    config.hybridKernelRadius    = int(dicKernelRadius * config.hybridKernelMultiplier)
+    config.allTextureKernelRadii = [int(dicKernelRadius * mult) for mult in textureKernelMultipliers]
 
     apply_function_if_code_changed(dataset, config, data_augmentation.append_texture_features)
 
@@ -190,14 +190,6 @@ def plot_frame_data_figures(dataset: 'Dataset', config: FiberCrackConfig, target
         plotting.plot_unmatched_cracks_for_frame(axis_builder, frameData, dataset.get_header(), config.magnifiedRegion)
         plotting.plot_image_cracks_for_frame(axis_builder, frameData, dataset.get_header(), config.magnifiedRegion)
         plotting.plot_reference_crack_for_frame(axis_builder, frameData, dataset.get_header())
-
-        # Assign the labels to the axes.
-        # todo does this work?
-        # labels = [''] * figureNumber
-        # labels[0:len(labels1)] = labels1
-        # labels[5:len(labels2)] = labels2
-        # labels[12:len(labels3)] = labels3
-        # labels[20:len(labels4)] = labels4
 
         figuresDir = os.path.join(config.outDir, 'figures-{}'.format(config.dataConfig.metadataFilename))
         if not os.path.exists(figuresDir):
@@ -302,7 +294,6 @@ def plot_crack_extraction_view(axisBuilder: Callable[[str], plt.Axes], frameData
     plotting.plot_image_cracks_for_frame(axisBuilder, frameData, header)
     plotting.plot_reference_crack_for_frame(axisBuilder, frameData, header)
     plotting.plot_feature_histograms_for_frame(axisBuilder, frameData, header)
-    # plotting.plot_crack_prediction_for_frame(axisBuilder, frameData, header)
 
 
 def plot_crack_prediction_view(axisBuilder: Callable[[str], plt.Axes], frameData, header):
@@ -336,10 +327,6 @@ def export_crack_volume(dataset: 'Dataset', config: FiberCrackConfig):
     frameNumber = dataset.get_frame_number() - framesToSkip
     # The volume should be exported in Z,Y,X,C with C-order.
     volume = np.zeros((frameNumber * frameWidth, frameSize[1], frameSize[0], 4), dtype=np.uint8)
-
-    # crackAreaMeasured = dataset.get_metadata_column('crackAreaHybrid')
-    # firstNonEmptyFrame = next(i for i, area in enumerate(crackAreaMeasured.tolist())
-    #                           if area > 0 and dataset.get_metadata_val(i, 'hasCameraImage'))
 
     strain = dataset.get_metadata_column('Strain (%)')
     minStrain = config.exportedVolumeStrainMin
@@ -452,8 +439,7 @@ def fiber_crack_run(command: str, config: FiberCrackConfig, frame: int = None):
         'optic-flow': lambda: plot_optic_flow(dataset),
         'export-figures': lambda: plot_figures(dataset, config, frame),
         'export-figures-only-area': lambda: plot_crack_area_figures(dataset, config),
-        'export-crack-propagation': lambda: export_crack_propagation(dataset, config),
-        'plot-prediction': lambda: plot_to_pdf(dataset, config, plot_crack_prediction_view)
+        'export-crack-propagation': lambda: export_crack_propagation(dataset, config)
     }
     
     timeStart = time.time()
@@ -483,14 +469,14 @@ def main():
         'optic-flow',
         'export-figures',
         'export-figures-only-area',
-        'export-crack-propagation',
-        'plot-prediction',
+        'export-crack-propagation'
     ]
     
     # Parse the arguments.
     parser = argparse.ArgumentParser('Fiber crack.')
     parser.add_argument('-d', '--data-path', required=True, type=str)
     parser.add_argument('-p', '--preloaded-path', required=True, type=str)
+    parser.add_argument('-o', '--out-path', required=True, type=str)
     parser.add_argument('-c', '--command', default='plot', choices=commandList)
     parser.add_argument('-g', '--config', required=True, type=str)
     parser.add_argument('-f', '--frame', default=None, type=int)
@@ -503,6 +489,7 @@ def main():
     # Prepend the paths passed at runtime to the configuration file.
     config.dataConfig.basePath = os.path.join(args.data_path, config.dataConfig.basePath)
     config.dataConfig.preloadedDataDir = args.preloaded_path
+    config.outDir = args.out_path
 
     fiber_crack_run(args.command,
                     config,

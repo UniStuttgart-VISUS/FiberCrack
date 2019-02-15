@@ -28,12 +28,6 @@ def append_grayscale_images(dataset: 'Dataset',
     """
     Append an image for each frame (if exists).
     A generic method used for camera images and images derived from them.
-
-    :param dataset:
-    :param imagePathGetter:
-    :param columnName:
-    :param metacolumnName:
-    :return:
     """
 
     h5Data, header, frameMap, *r = dataset.unpack_vars()
@@ -76,10 +70,6 @@ def append_camera_image(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
     """
     Appends a column containing grayscale data from the camera.
     The data is cropped from the frame according to the mapping between the data and the image.
-
-    :param dataConfig:
-    :param dataset:
-    :return:
     """
 
     imagePathGetter = lambda frame: os.path.join(dataConfig.basePath, dataConfig.imageDir,
@@ -93,10 +83,6 @@ def append_ground_truth_image(dataset: 'Dataset', dataConfig: 'DataImportConfig'
     """
     Appends a column containing binary image of the crack area.
     The data is cropped from the frame according to the mapping between the data and the image.
-
-    :param dataConfig:
-    :param dataset:
-    :return:
     """
 
     if dataConfig.groundTruthDir is None:
@@ -118,9 +104,6 @@ def append_matched_pixels(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
     Also stores the 'back-flow', which maps pixels back into the reference frame.
 
     Note that the matching is computed w.r.t. to the overall image shift.
-    :param dataConfig:
-    :param dataset:
-    :return:
     """
     h5Data, header, frameMap, *r = dataset.unpack_vars()
     imageShift = dataset.get_image_shift()
@@ -157,10 +140,7 @@ def append_matched_pixels(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
 
 def zero_pixels_without_tracking(dataset: 'Dataset'):
     """
-    Remove the flow data for pixels that have lost tracking,
-    sicne it's unreliable.
-    :param dataset:
-    :return:
+    Remove the flow data for pixels that have lost tracking, since it's unreliable.
     """
     h5Data, header, frameMap, *r = dataset.unpack_vars()
     # frameSize = dataset.get_frame_size()
@@ -179,7 +159,6 @@ def append_data_image_mapping(dataset: 'Dataset'):
     Fetch the min/max pixel coordinates of the data, in original image space (2k*2k image)
     Important, since the data only covers every ~fifth pixel of some cropped subimage of the camera image.
 
-    :param dataset:
     :return: (min, max, step)
     """
     h5Data, header, *r = dataset.unpack_vars()
@@ -200,8 +179,6 @@ def append_physical_frame_size(dataset: 'Dataset'):
     """
     Find out the physical size of the specimen (more precisely, the size
     of the region of interest) and store it in the data.
-    :param dataset:
-    :return:
     """
     h5Data, header, *r = dataset.unpack_vars()
 
@@ -227,9 +204,6 @@ def compute_avg_flow(dataset: 'Dataset'):
     """
     Sample the flow/shift (u,v) at a few points to determine the average shift of each frame
     relative to the base frame.
-
-    :param dataset:
-    :return:
     """
 
     h5Data, header, *r = dataset.unpack_vars()
@@ -258,21 +232,17 @@ def compute_avg_flow(dataset: 'Dataset'):
     return avgFlow
 
 
-def append_texture_features(dataset: 'Dataset', allTextureKernelSizes,
+def append_texture_features(dataset: 'Dataset', allTextureKernelRadii,
                             textureFilters: List[str]):
     """
     Compute and append various texture features with various kernel sizes.
-    :param dataset:
-    :param allTextureKernelSizes:
-    :param textureFilters:
-    :return:
     """
     allFeatureNames = set()
 
     for f in range(dataset.get_frame_number()):
         frameImage = dataset.get_column_at_frame(f, 'camera')
 
-        for kernelSize in allTextureKernelSizes:
+        for kernelSize in allTextureKernelRadii:
             for filterName in textureFilters:
                 result = image_processing.image_filter(filterName, frameImage, kernelSize)
                 featureName = 'cameraImage{}-{}'.format(filterName.capitalize(), kernelSize)
@@ -288,10 +258,6 @@ def append_texture_features(dataset: 'Dataset', allTextureKernelSizes,
 def append_crack_area_ground_truth(dataset: 'Dataset', dataConfig: 'DataImportConfig'):
     """
     Load crack area (scalar) ground truth from CSV files, if available.
-
-    :param dataset:
-    :param dataConfig:
-    :return:
     """
 
     frameMap = dataset.get_frame_map()

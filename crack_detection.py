@@ -61,16 +61,8 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius,
                                        unmatchedPixelsHolesThreshold: float):
     """
     Detect the crack pixels based on which pixels haven't been 'matched to'
-    from the reference frame. These pixels have 'appeared out of nowhere' and
-    potentially represent the crack.
-
-    :param dataset:
-    :param dicKernelRadius:
-    :param unmatchedPixelsPadding:
-    :param unmatchedPixelsMorphologyDepth:
-    :param unmatchedPixelsObjectsThreshold:
-    :param unmatchedPixelsHolesThreshold:
-    :return:
+    from the reference frame (DIC-based).
+    These pixels have 'appeared out of nowhere' and potentially represent the crack.
     """
     frameWidth, frameHeight = dataset.get_frame_size()
     header = dataset.get_header()
@@ -102,7 +94,6 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius,
         # Binary thresholding.
         thresholdBinary = lambda t: lambda x: 1.0 if x >= t else 0.0
         matchedPixelsGaussThres = np.vectorize(thresholdBinary(0.5))(matchedPixelsGauss)
-        # matchedPixelsGaussThres = skimage.morphology.binary_dilation(matchedPixels, selem)
 
         # Morphological filtering.
 
@@ -143,15 +134,10 @@ def append_crack_from_unmatched_pixels(dataset: 'Dataset', dicKernelRadius,
         dataset.h5Data[frameIndex, :, :, index4] = matchedPixelsCrack
 
 
-def append_crack_from_variance(dataset: 'Dataset', textureKernelSize, varianceThreshold=0.003):
+def append_crack_from_variance(dataset: 'Dataset', textureKernelRadius, varianceThreshold=0.003):
     """
     Detect crack pixels based on local variance computed from the current camera frame.
     (Purely image-based technique.)
-
-    :param dataset:
-    :param textureKernelSize:
-    :param varianceThreshold:
-    :return:
     """
     print("Computing cracks from variance.")
 
@@ -167,28 +153,24 @@ def append_crack_from_variance(dataset: 'Dataset', textureKernelSize, varianceTh
         cameraImage = frameData[..., header.index('camera')]
 
         # Compute variance.
-        cameraImageVar = image_processing.image_variance_filter(cameraImage, textureKernelSize)
+        cameraImageVar = image_processing.image_variance_filter(cameraImage, textureKernelRadius)
 
         # Threshold.
         varianceBinary = cameraImageVar < varianceThreshold
 
         # Clean up.
         varianceFiltered = varianceBinary.copy()
-        for i in range(0, math.ceil(textureKernelSize / 2.0)):
+        for i in range(0, textureKernelRadius - 1):
             varianceFiltered = skimage.morphology.binary_dilation(varianceFiltered, selem)
 
         dataset.h5Data[frameIndex, ..., index1] = cameraImageVar
         dataset.h5Data[frameIndex, ..., index2] = varianceFiltered
 
 
-def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThreshold=1.0):
+def append_crack_from_entropy(dataset: 'Dataset', textureKernelRadius, entropyThreshold=1.0):
     """
     Detect crack pixels based on local entropy computed from the current camera frame.
     (Purely image-based technique.)
-    :param dataset:
-    :param textureKernelSize:
-    :param entropyThreshold:
-    :return:
     """
 
     # todo a lot of repetition between the variance and the entropy implementations.
@@ -208,14 +190,14 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
         cameraImage = frameData[..., header.index('camera')]
 
         #  Compute entropy.
-        cameraImageEntropy = image_processing.image_entropy_filter(cameraImage, textureKernelSize)
+        cameraImageEntropy = image_processing.image_entropy_filter(cameraImage, textureKernelRadius)
 
         # Threshold.
         entropyBinary = cameraImageEntropy < entropyThreshold
 
         # Clean up.
         entropyFiltered = entropyBinary.copy()
-        for i in range(0, math.ceil(textureKernelSize / 2.0)):
+        for i in range(0, textureKernelRadius - 1):
             entropyFiltered = skimage.morphology.binary_dilation(entropyFiltered, selem)
 
         dataset.h5Data[frameIndex, ..., index1] = cameraImageEntropy
@@ -223,7 +205,7 @@ def append_crack_from_entropy(dataset: 'Dataset', textureKernelSize, entropyThre
         dataset.h5Data[frameIndex, ..., index3] = entropyFiltered
 
 
-def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', hybridKernelSize,
+def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', hybridKernelRadius,
                                             entropyThreshold, hybridDilationDepth: int, unmatchedPixelsPadding=0.1):
     """
     Detect crack pixels based on both the local entropy filtering and
@@ -233,11 +215,6 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', hybridKernelSize
     Narrowing the search region based on unmatched pixels allows to reduce
     the kernel size for the entropy filter and increase the spatial precision.
 
-    :param dataset:
-    :param hybridKernelSize:
-    :param entropyThreshold:
-    :param hybridDilationDepth:
-    :param unmatchedPixelsPadding:
     :return:
     """
     header = dataset.get_header()
@@ -245,7 +222,7 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', hybridKernelSize
 
     frameWidth, frameHeight = dataset.get_frame_size()
     # Use a smaller entropy kernel size, since we narrow the search area using unmatched pixels.
-    entropyFilterRadius = hybridKernelSize
+    entropyFilterRadius = hybridKernelRadius
 
     index1 = dataset.create_or_get_column('hybridUnmatchedDilated')
     index2 = dataset.create_or_get_column('hybridEntropyBinary')
@@ -272,7 +249,7 @@ def append_crack_from_unmatched_and_entropy(dataset: 'Dataset', hybridKernelSize
         entropyBinary = imageEntropy < entropyThreshold  # type: np.ndarray
 
         entropyFiltered = entropyBinary.copy()
-        entropyFiltered = _binary_dilation_repeated(entropyFiltered, selem, int(math.ceil(entropyFilterRadius / 2.0)))
+        entropyFiltered = _binary_dilation_repeated(entropyFiltered, selem, entropyFilterRadius - 1)
 
         # Crack = low entropy near unmatched pixels.
         cracks = np.logical_and(unmatchedPixels, entropyFiltered)
@@ -288,9 +265,6 @@ def append_reference_frame_crack(dataset: 'Dataset', dicKernelRadius, sigmaSkele
     i.e. based on which pixels have lost tracking and can no longer be found
     in the current frame.
 
-    :param dataset:
-    :param dicKernelRadius:
-    :return:
     """
     frameSize = dataset.get_frame_size()
 

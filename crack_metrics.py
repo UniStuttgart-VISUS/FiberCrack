@@ -14,9 +14,6 @@ def upper_first(str: str) -> str:
 def append_estimated_crack_area(dataset: 'Dataset'):
     """
     Computes the area of the crack extracted with each available method.
-
-    :param dataset:
-    :return:
     """
 
     print("Computing estimated crack areas...")
@@ -28,8 +25,6 @@ def append_estimated_crack_area(dataset: 'Dataset'):
         'cameraImageVarFiltered': 'variance',
         'cameraImageEntropyFiltered': 'entropy',
         'hybridCracks': 'hybrid',
-        'crackPredictionBinary': 'predictionSimple',
-        'crackPredictionSpatialBinary': 'predictionSpatial',
 
         'crackGroundTruth': 'groundTruth',
     }

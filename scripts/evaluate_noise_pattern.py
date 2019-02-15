@@ -48,7 +48,7 @@ def main():
         "M:\\Experiments\\Steel-Epoxy\\raw_images\\Spec054-0000_0.tif"
     ]
     
-    textureKernelSize = 40
+    textureKernelRadius = 40
 
     for cameraImagePath in imagePaths:
         cameraImageAvailable = os.path.isfile(cameraImagePath)
@@ -59,8 +59,8 @@ def main():
             if cameraImage.ndim == 3:  # If it's a multichannel image.
                 cameraImage = cameraImage[..., 0]  # Use only the first channel.
 
-            cameraImageEntropy = image_entropy_filter(cameraImage, textureKernelSize)
-            cameraImageVariance = image_variance_filter(cameraImage, textureKernelSize)
+            cameraImageEntropy = image_entropy_filter(cameraImage, textureKernelRadius)
+            cameraImageVariance = image_variance_filter(cameraImage, textureKernelRadius)
 
             entropyMean = np.mean(cameraImageEntropy)
             entropyMedian = np.median(cameraImageEntropy)

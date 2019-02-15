@@ -18,37 +18,46 @@ class FiberCrackConfig:
         self.dataConfig.dataFormat = 'csv'
         self.dataConfig.imageFilenameFormat = '{}-{:04d}_0.tif'
 
-        self.dataConfig.reloadOriginalData = False
+        self.outDir = ''
 
-        self.maxFrames = 99999
+        # Force a reload of the data, instead of using the preloaded data location.
+        self.dataConfig.reloadOriginalData = False
+        # Force results to be recomputed, instead of using the preloaded data location.
         self.recomputeResults = False
 
-        self.dataConfig.dicKernelSize = 55
+        # Default kernel size (typically overriden for each dataset).
+        self.dataConfig.dicKernelSize = 80
 
-        self.allTextureKernelMultipliers = [2.0, 1.5, 1.0, 0.5, 0.25]
+        # Try out multiple kernel sizes for potential visual comparison of the results.
+        self.allTextureKernelMultipliers = [1.5, 1.0, 0.5]
         self.textureFilters = ['entropy', 'variance']
+        # Texture kernel size that will be used for image-based crack extraction.
         self.textureKernelMultiplier = 0.8
+        # Thresholds for the texture filters.
         self.entropyThreshold = 1.0 
         self.varianceThreshold = 0.003 
 
-        self.unmatchedPixelsPadding = 0.15 
+        # Unmatched pixels (DIC) are padded because DIC always fails at the borders of ROI.
+        self.unmatchedPixelsPadding = 0.15
+        self.sigmaSkeletonPadding = 0.15
+
         self.unmatchedPixelsMorphologyDepth = 2   # How many dilations/erosions are used before removing objects/holes.
         self.unmatchedPixelsObjectsThreshold = 1 / 50   # Fraction of the image area.
-        self.unmatchedPixelsHolesThreshold = 1 / 6   # Fraction of the zero-valued image area (sclaes with the crack).
+        self.unmatchedPixelsHolesThreshold = 1 / 6   # Fraction of the zero-valued image area (scales with the crack).
 
+        # Texture kernel size that will be used for hybrid crack extraction.
         self.hybridKernelMultiplier = 0.4
-        self.hybridDilationDepth = 3   # How many dilations are applied to expand the search range.
+        # How many dilations are applied to expand the search range.
+        self.hybridDilationDepth = 3
 
-        self.sigmaSkeletonPadding = 0.15 
-
-        self.outDir = 'T:/out/fiber-crack'
-
+        # Volume export configuration: which timesteps to use, how to map strain to volume density.
         self.exportedVolumeTimestepWidth = 3
         self.exportedVolumeGradientWidth = 3
         self.exportedVolumeSkippedFrames = 5
         self.exportedVolumeStrainMin = 4.0
         self.exportedVolumeStrainMax = 7.5
 
+        # Magnified figures settings.
         self.magnifiedFigureNames = ['hybrid-crack-thin', 'matched-pixels-crack-thin']
         self.magnifiedRegion = ((0.5, 0.7), (0.3, 0.55))
         self.magnifiedRatio = 2

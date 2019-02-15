@@ -6,6 +6,22 @@ __all__ = ['Dataset']
 
 
 class Dataset:
+    """
+    The dataset represents all the data consumed and produced by the FiberCrack code.
+    It is used for passing the data in and out of various loading/computing functions,
+    avoid long cumbersome argument lists and needing to pass data arrays through
+    multiple function calls to make them available where they're needed.
+
+    The Dataset uses HDF files to store all the data, which also allows the data to be
+    cached on disk and loaded during later runs.
+
+    The main part of the dataset is the 'data' array, which is a large 2D [timesteps x width x height x columns] array,
+    storing multiple features for each spatiotemporal location.
+    Each column represents either the input, intermediate or the computed data.
+    The header stores the names for the columns.
+
+    The metadata array is shaped [timesteps x columns] and stores per-timestep metadata (e.g. global strain).
+    """
 
     @staticmethod
     def get_data_feature_number():

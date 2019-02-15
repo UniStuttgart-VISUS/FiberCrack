@@ -14,26 +14,18 @@ import PythonExtras.common_data_tools as common_data_tools
 
 def perform_parameter_analysis():
 
-    rootOutDirPath = 'T:\\out\\fiber-crack\\parameter-study'
-    paperOutDirPath = 'T:\\projects\\papers\\MontrealGeneral\\Papers\\Applied\\'
+    rootOutDirPath = 'PLACEHOLDER-PATH'
+    paperOutDirPath = 'PLACEHOLDER-PATH'
 
     baseConfigPath = '..\\configs\\ptfe-epoxy.json'
-    frameToExport = 3330
-
     # baseConfigPath = '..\\configs\\steel-epoxy.json'
-    # frameToExport = 1150
 
     parameterAxes = {
-        # 'unmatchedPixelsMorphologyDepth': [0, 1, 2, 3, 4],
-        ### 'unmatchedPixelsObjectsThreshold': 1 / np.asarray([10, 25, 50, 75, 100]),
-        ### 'unmatchedPixelsHolesThreshold': 1 / np.asarray([0.1, 1, 3, 6, 9, 12, 20]),
         'hybridKernelMultiplier':  [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0],
-        # 'hybridKernelMultiplier': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.9, 1.0],
         # 'hybridDilationDepth': [0, 1, 3, 5, 7],
         # 'entropyThreshold': [0.6, 0.8, 1.0, 1.2, 1.4, 1.6]
     }
     chosenValues = {
-        'unmatchedPixelsMorphologyDepth': 3,
         'hybridKernelMultiplier': 0.4,
         'hybridDilationDepth': 3,
         'entropyThreshold': 1.0
@@ -101,7 +93,7 @@ def perform_parameter_analysis():
 
             # For Steel-Epoxy there's no ground truth images, just a small csv with scalars.
             if datasetName == 'SteelEpoxy.csv':
-                groundTruthCsvPath = 'T:\\data\\montreal-full\\Experiments\\Steel-Epoxy\\Steel_measured_Ilyass.csv'
+                groundTruthCsvPath = 'PLACEHOLDER-PATH'
                 csvData, csvHeader = common_data_tools.read_csv_data(groundTruthCsvPath, delimiter=';')
                 truthSparse = csvData[:, (csvHeader.index('Strain'), csvHeader.index('Average'))]
                 # Convert from the sparse representation into a dense one, fill in with zeros.
