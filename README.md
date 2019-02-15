@@ -14,4 +14,5 @@ An example command line configuration:
 ```
 python fiber_crack.py -d /path/to/data -p /tmp/path -o /path/to/output -c export-figures -f 3330 -g configs/ptfe-epoxy.json
 ```
-
+## License
+The code in this repository is licensed under the MIT license.
